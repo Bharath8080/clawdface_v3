@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Root Variables ─────────────────────────────────────── */
+:root {
+  --lk-va-bar-width: 72px;
+  --lk-control-bar-height: unset;
+}
+
+@layer components {
+  .agent-visualizer > .lk-audio-bar { width: 72px; }
+  .lk-agent-control-bar { @apply border-t-0 p-0 h-min mr-4; }
+  .lk-disconnect-button  { @apply h-[36px] hover:bg-[#6b221a] hover:text-[white] bg-[#31100c] border-[#6b221a]; }
+
+  /* Premium Chat Styles */
+  .chat-sidebar-container { @apply flex h-full border-l border-white/5 bg-[#0a0a0a] bg-opacity-40 backdrop-blur-xl overflow-hidden; }
+  .bubble-container        { @apply flex flex-col gap-1 mb-6 max-w-[90%]; }
+  .bubble-label            { @apply text-[10px] font-bold uppercase tracking-[0.1em] text-white/40 mb-1 px-1; }
+  .agent-bubble            { @apply bg-[#1a1a1a] border border-white/5 text-white/90 p-4 rounded-2xl rounded-tl-sm text-[15px] leading-relaxed shadow-xl; }
+  .user-bubble             { @apply bg-white text-black p-4 rounded-2xl rounded-tr-sm text-[15px] leading-relaxed shadow-xl self-end; }
+
+  /* Premium Control Bar */
+  .control-pill            { @apply flex items-center bg-white/10 backdrop-blur-md rounded-full p-1 gap-0 hover:bg-white/15 transition-all duration-200 border border-white/5; }
+  .control-button-white    { @apply flex items-center justify-center w-10 h-10 rounded-full bg-white text-black shadow-lg hover:bg-neutral-100 transition-all duration-200; }
+  .control-dropdown-part   { @apply flex items-center justify-center px-2 py-1 h-10 text-white/60 hover:text-white/90 transition-all duration-200 cursor-pointer; }
+  .control-circle          { @apply flex items-center justify-center w-12 h-12 rounded-full bg-white/10 backdrop-blur-md border border-white/5 text-white/90 hover:bg-white/20 transition-all duration-200;
+    &.active { @apply bg-white text-black; }
+  }
+  .disconnect-circle       { @apply flex items-center justify-center w-12 h-12 rounded-full bg-[#EA4335] text-white shadow-xl hover:bg-[#d93025] transition-all duration-200 scale-100 hover:scale-105; }
+
+  /* Custom Scrollbar */
+  .custom-scrollbar::-webkit-scrollbar       { width: 3px; height: 3px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 4px; }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.2); }
+}

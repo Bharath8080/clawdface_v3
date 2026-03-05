@@ -1,0 +1,13 @@
+livekit-agents[openai,silero,turn-detector,deepgram,google,cartesia,elevenlabs,groq,tavus]
+livekit-plugins-aws[realtime]
+livekit-plugins-noise-cancellation
+python-dotenv
+requests
+pydantic
+flask
+pandas
+websockets
+rich
+mcp
+librosa
+moondream
