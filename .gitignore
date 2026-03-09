@@ -11,6 +11,9 @@ wheels/
 env/
 venv/
 
+# Runtime session config files
+data/room-configs/
+
 # Environment secrets
 .env
 .env.*

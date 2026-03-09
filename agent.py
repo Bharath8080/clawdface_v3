@@ -1,6 +1,9 @@
 import os
+import json
 import requests
+import asyncio
 import threading
+import glob
 from flask import Flask, request, Response
 from dotenv import load_dotenv
 from livekit import agents
@@ -9,58 +12,56 @@ from livekit.plugins import elevenlabs, openai, trugen
 
 load_dotenv()
 
-# --- CONFIGURATION ---
-OPENCLAW_URL = os.getenv("OPENCLAW_URL", "http://localhost:18789")
-GATEWAY_TOKEN = os.getenv("OPENCLAW_GATEWAY_TOKEN", "d73dbe23610cf52243cc6119ad50155fcaa52ec7cc9e79f0")
-SESSION_KEY = os.getenv("OPENCLAW_SESSION_KEY", "agent:main:bharath-bot")
-
-# --- OPENCLAW SESSION PROXY (INTERNAL) ---
-# Integrated proxy logic from main.py
+# --- OPENCLAW SESSION PROXY (Stateless / Mega-Token) ---
 app = Flask(__name__)
 
 @app.route('/v1/chat/completions', methods=['POST'])
 def chat_proxy():
-    print(f"\n[INFO] New message from TruGenAI...")
     try:
         data = request.get_json()
         messages = data.get('messages', [])
+
+        # 1. Unpack "Mega-Token" from Authorization header (URL|TOKEN|KEY)
+        auth_header = request.headers.get("Authorization", "")
+        token_str = auth_header.replace("Bearer ", "")
         
-        # 1. FIND ALL USER MESSAGES AT THE TAIL
-        # TruGenAI/LiveKit sends full history, but OpenClaw saves it too.
-        # We collect all consecutive user messages from the end to capture the full turn.
+        if "|" not in token_str:
+             print("[PROXY] ✗ Invalid Mega-Token format")
+             return {"error": "Missing x-openclaw-url. Check your Mega-Token."}, 400
+
+        # Unpack: URL | TOKEN | SESSION_KEY
+        parts = token_str.split("|")
+        target_url = parts[0]
+        gate_token = parts[1]
+        sess_key   = parts[2]
+
+        print(f"\n[PROXY] → {target_url}  session={sess_key}")
+
+        # Filter to only send user messages to OpenClaw (it manages history)
         new_messages = []
         for msg in reversed(messages):
             if msg.get('role') == 'user':
                 new_messages.insert(0, msg)
             else:
-                # Stop as soon as we hit an assistant or system message
                 break
-        
+
         if not new_messages:
             return {"error": "No user message found"}, 400
 
-        # 2. PREPARE HEADERS
         headers = {
-            "Authorization": f"Bearer {GATEWAY_TOKEN}",
-            "x-openclaw-session-key": SESSION_KEY,
+            "Authorization": f"Bearer {gate_token}",
+            "x-openclaw-session-key": sess_key,
             "x-openclaw-agent-id": "main"
         }
 
-        # 3. FORWARD TO OPENCLAW
-        combined_text = " ".join([m.get("content", "") for m in new_messages])
-        print(f"[DEBUG] Proxy: SendingTurn ({len(new_messages)} msgs): {combined_text[:50]}...")
         resp = requests.post(
-            f"{OPENCLAW_URL}/v1/chat/completions",
+            f"{target_url}/v1/chat/completions",
             headers=headers,
-            json={
-                "model": "main",
-                "messages": new_messages,
-                "stream": data.get("stream", True)
-            },
-            stream=True
+            json={"model": "main", "messages": new_messages, "stream": data.get("stream", True)},
+            stream=True,
+            timeout=30
         )
 
-        # 4. STREAM RESPONSE BACK
         def generate():
             for chunk in resp.iter_content(chunk_size=1024):
                 yield chunk
@@ -68,26 +69,19 @@ def chat_proxy():
         return Response(generate(), resp.status_code, {"Content-Type": "text/event-stream"})
 
     except Exception as e:
-        print(f"[ERROR] Proxy failed: {e}")
+        print(f"[PROXY] Error: {e}")
         return {"error": str(e)}, 500
 
 def run_proxy():
-    print(f"--- OpenClaw Session Proxy Active (Agent Internal) ---")
-    print(f"Targeting Session: {SESSION_KEY}")
-    # Using port 8081 if 8080 is often taken, but matching main.py's 8080 for consistency
+    print("--- OpenClaw Proxy Active (port 8080) ---")
     app.run(host='0.0.0.0', port=8080, debug=False, use_reloader=False)
 
-# Start Proxy Thread
-proxy_thread = threading.Thread(target=run_proxy, daemon=True)
-proxy_thread.start()
+threading.Thread(target=run_proxy, daemon=True).start()
 
 # --- LIVEKIT AGENT ---
 AGENT_INSTRUCTIONS = (
-    "You are a helpful AI assistant with a live video avatar. "
-    "Keep responses to 2-4 short spoken sentences. "
-    "Be conversational and natural. "
-    "Never use markdown, bullet points, or any formatting — "
-    "your words are spoken aloud via TTS."
+    "You are a helpful AI assistant. Keep responses to 2-4 short spoken sentences. "
+    "Be conversational. Never use markdown, bullet points, or formatting."
 )
 
 class MyAgent(Agent):
@@ -96,15 +90,52 @@ class MyAgent(Agent):
 
 server = AgentServer()
 
+def get_latest_config():
+    """Fall back to the latest user configuration file from the data folder."""
+    config_dir = r"c:\Users\homeu\clawdface\frontend\data\user-configs"
+    files = glob.glob(os.path.join(config_dir, "*.json"))
+    if not files:
+        return None
+    latest_file = max(files, key=os.path.getmtime)
+    with open(latest_file, "r") as f:
+        return json.load(f)
+
 @server.rtc_session()
 async def my_agent(ctx: agents.JobContext):
-    # LLM via our internal proxy endpoint (localhost:8080)
+    await ctx.connect()
+    
+    # 1. Get Config (Try metadata immediately, then fallback to local file)
+    config = None
+    for p in ctx.room.remote_participants.values():
+        if p.metadata:
+            try:
+                config = json.loads(p.metadata)
+                print(f"[SESSION] ✓ Config from participant metadata")
+                break
+            except: pass
+    
+    if not config:
+        config = get_latest_config()
+        if config:
+            print(f"[SESSION] ✓ Config from latest local file")
+        else:
+            print(f"[SESSION] ✗ No config found (metadata or file)")
+            return
+
+    url    = config.get("openclawUrl", "")
+    token  = config.get("gatewayToken", "")
+    key    = config.get("sessionKey", "")
+
+    # 2. MEGA-TOKEN: Pack everything into the api_key for the proxy
+    mega_token = f"{url}|{token}|{key}"
+
     openclaw_llm = openai.LLM(
         model="main",
         base_url="http://localhost:8080/v1",
-        api_key=GATEWAY_TOKEN
+        api_key=mega_token,
     )
 
+    # 3. Simple AgentSession setup
     session = AgentSession(
         stt="deepgram/nova-3",
         llm=openclaw_llm,
@@ -118,13 +149,7 @@ async def my_agent(ctx: agents.JobContext):
     trugen_avatar = trugen.AvatarSession(avatar_id=avatar_id)
     await trugen_avatar.start(session, room=ctx.room)
 
-    # Start the voice session
-    await session.start(
-        room=ctx.room,
-        agent=MyAgent()
-    )
-
-    # Agent speaks first
+    await session.start(room=ctx.room, agent=MyAgent())
     session.say("Hello! I'm ready to chat.")
 
 if __name__ == "__main__":
