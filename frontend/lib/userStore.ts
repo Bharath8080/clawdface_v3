@@ -1,40 +1,50 @@
-import { supabase } from "./supabase";
+import fs from "fs/promises";
+import path from "path";
 
 /**
- * Persistent verified-users store backed by Supabase.
- * Survives server restarts and works in serverless environments.
+ * Persistent verified-users store using Environment Variables or local JSON.
+ * works on serverless (Vercel) via env vars.
  */
 
+const VERIFIED_USERS_FILE = path.join(process.cwd(), "data", "verified-users.json");
+
 export async function isVerifiedUser(email: string): Promise<boolean> {
+  const cleanEmail = email.toLowerCase().trim();
+
+  // 1. Check Environment Variable (Best for Vercel)
+  const envEmails = process.env.VERIFIED_EMAILS || "";
+  if (envEmails.split(",").map(e => e.trim().toLowerCase()).includes(cleanEmail)) {
+    return true;
+  }
+
+  // 2. Check Local JSON (Fallback for local dev)
   try {
-    const { data, error } = await supabase
-      .from("verified_users")
-      .select("email")
-      .eq("email", email.toLowerCase())
-      .single();
-
-    if (error && error.code !== "PGRST116") { // PGRST116 is "no rows found"
-      console.error("[userStore] Error checking verification:", error);
-      return false;
-    }
-
-    return !!data;
+    const data = await fs.readFile(VERIFIED_USERS_FILE, "utf-8");
+    const users: string[] = JSON.parse(data);
+    return users.map(u => u.toLowerCase()).includes(cleanEmail);
   } catch (e) {
-    console.error("[userStore] Unexpected error in isVerifiedUser:", e);
     return false;
   }
 }
 
 export async function registerVerifiedUser(email: string): Promise<void> {
+  const cleanEmail = email.toLowerCase().trim();
+  
+  // NOTE: On Vercel, this won't persist to the file system.
+  // The user should be added to the VERIFIED_EMAILS env var for permanent access.
   try {
-    const { error } = await supabase
-      .from("verified_users")
-      .upsert({ email: email.toLowerCase() });
+    let users: string[] = [];
+    try {
+      const data = await fs.readFile(VERIFIED_USERS_FILE, "utf-8");
+      users = JSON.parse(data);
+    } catch {}
 
-    if (error) {
-      console.error("[userStore] Error registering user:", error);
+    if (!users.includes(cleanEmail)) {
+      users.push(cleanEmail);
+      await fs.mkdir(path.dirname(VERIFIED_USERS_FILE), { recursive: true });
+      await fs.writeFile(VERIFIED_USERS_FILE, JSON.stringify(users, null, 2));
     }
   } catch (e) {
-    console.error("[userStore] Unexpected error in registerVerifiedUser:", e);
+    console.error("[userStore] Local register failed (expected on Vercel):", e);
   }
 }

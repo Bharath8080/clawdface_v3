@@ -60,27 +60,17 @@ export default function Page() {
   // Session config state
   const [config, setConfig] = useState<typeof DEFAULTS>(DEFAULTS);
 
-  // Load config from server on mount
+  // Load config from localStorage on mount
   useEffect(() => {
-    async function fetchConfig() {
-      const user = getUser();
-      if (!user?.email) return;
-
+    const saved = localStorage.getItem("openclaw_config");
+    if (saved) {
       try {
-        const url = new URL("/api/user-config", window.location.origin);
-        url.searchParams.set("email", user.email);
-        const resp = await fetch(url.toString());
-        if (resp.ok) {
-          const remoteConfig = await resp.json();
-          if (remoteConfig && Object.keys(remoteConfig).length > 0) {
-            setConfig((prev) => ({ ...prev, ...remoteConfig }));
-          }
-        }
-      } catch (err) {
-        console.error("Failed to load user config:", err);
+        const parsed = JSON.parse(saved);
+        setConfig((prev) => ({ ...prev, ...parsed }));
+      } catch (e) {
+        console.error("Failed to parse saved config:", e);
       }
     }
-    fetchConfig();
   }, []);
 
   useEffect(() => {
@@ -92,19 +82,8 @@ export default function Page() {
   }, [router]);
 
   const onConnectButtonClicked = useCallback(async () => {
-    const user = getUser();
-    if (user?.email) {
-      // Persist config to server
-      try {
-        await fetch("/api/user-config", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: user.email, config }),
-        });
-      } catch (err) {
-        console.error("Failed to save user config:", err);
-      }
-    }
+    // Persist config to localStorage
+    localStorage.setItem("openclaw_config", JSON.stringify(config));
 
     const url = new URL(
       process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT ?? "/api/connection-details",
