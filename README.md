@@ -21,6 +21,7 @@ ClawdFace is a high-performance, real-time Voice AI platform built with Next.js 
 | :--- | :--- |
 | **Frontend** | Next.js 15+, React 18, TailwindCSS, Framer Motion |
 | **Real-time** | LiveKit Cloud / @livekit/components-react |
+| **Google Auth**| @react-oauth/google (Implicit Flow + Profile Sync) |
 | **AI Agent** | Python 3.12+, livekit-agents framework |
 | **Persistence** | Browser `localStorage` + JSON File Sync (Hybrid) |
 | **Verification** | Environment Variables (`VERIFIED_EMAILS`) |

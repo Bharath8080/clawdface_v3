@@ -16,7 +16,10 @@ To achieve a "No-DB" deployment, the frontend implements a **Hybrid Storage Syst
 
 ## 🔐 Authentication & Verification
 
-- **Google OAuth**: Integrated via `@react-oauth/google`.
+- **Integration**: Powered by `@react-oauth/google` using the **Implicit Flow**.
+- **Context Provider**: `GoogleOAuthProvider` wraps the application (see `components/Providers.tsx`).
+- **Hook-based Login**: Uses the `useGoogleLogin` hook to fetch high-fidelity profiles from the Google UserInfo API.
+- **Persistence**: Successful sign-ins are stored in `localStorage` under `clawdface_auth`.
 - **Environment Verification**: Access is restricted using the `VERIFIED_EMAILS` environment variable. This allows the administrator to authorize users globally via Vercel's environment settings without managing a database table.
 
 ---
