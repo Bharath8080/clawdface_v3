@@ -60,17 +60,37 @@ export default function Page() {
   // Session config state
   const [config, setConfig] = useState<typeof DEFAULTS>(DEFAULTS);
 
-  // Load config from localStorage on mount
+  // Load config on mount
   useEffect(() => {
-    const saved = localStorage.getItem("openclaw_config");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setConfig((prev) => ({ ...prev, ...parsed }));
-      } catch (e) {
-        console.error("Failed to parse saved config:", e);
+    async function loadConfig() {
+      // 1. Try localStorage first (fastest)
+      const saved = localStorage.getItem("openclaw_config");
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          setConfig((prev) => ({ ...prev, ...parsed }));
+        } catch (e) {}
+      }
+
+      // 2. Fallback to local files (if localStorage is empty, e.g. first run or fresh browser)
+      const user = getUser();
+      if (user?.email) {
+        try {
+          const url = new URL("/api/user-config", window.location.origin);
+          url.searchParams.set("email", user.email);
+          const resp = await fetch(url.toString());
+          if (resp.ok) {
+            const remoteConfig = await resp.json();
+            if (remoteConfig) {
+              setConfig((prev) => ({ ...prev, ...remoteConfig }));
+              // Keep localStorage in sync
+              localStorage.setItem("openclaw_config", JSON.stringify(remoteConfig));
+            }
+          }
+        } catch (err) {}
       }
     }
+    loadConfig();
   }, []);
 
   useEffect(() => {
@@ -82,8 +102,23 @@ export default function Page() {
   }, [router]);
 
   const onConnectButtonClicked = useCallback(async () => {
-    // Persist config to localStorage
+    // 1. Persist config to localStorage (Works on Vercel)
     localStorage.setItem("openclaw_config", JSON.stringify(config));
+
+    // 2. Sync to local files (For local dev visibility)
+    const user = getUser();
+    if (user?.email) {
+      try {
+        await fetch("/api/user-config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: user.email, config }),
+        });
+      } catch (err) {
+        // Silently ignore sync failures on Vercel
+        console.warn("Local sync skipped (expected on production)");
+      }
+    }
 
     const url = new URL(
       process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT ?? "/api/connection-details",
