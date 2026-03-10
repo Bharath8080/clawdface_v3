@@ -87,6 +87,8 @@ class MyAgent(Agent):
     def __init__(self) -> None:
         super().__init__(instructions=AGENT_INSTRUCTIONS)
 
+server = AgentServer()
+
 @server.rtc_session()
 async def my_agent(ctx: agents.JobContext):
     await ctx.connect()
