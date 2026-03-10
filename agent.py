@@ -14,13 +14,6 @@ load_dotenv()
 # --- OPENCLAW SESSION PROXY (Stateless / Mega-Token) ---
 app = Flask(__name__)
 
-# Render provides the port via the PORT environment variable
-RENDER_PORT = int(os.environ.get("PORT", 8080))
-
-@app.route('/')
-def health_check():
-    return {"status": "ClawdFace Agent Proxy Active", "version": "1.0.0"}, 200
-
 @app.route('/v1/chat/completions', methods=['POST'])
 def chat_proxy():
     try:
@@ -79,8 +72,8 @@ def chat_proxy():
         return {"error": str(e)}, 500
 
 def run_proxy():
-    print(f"--- OpenClaw Proxy Active (port {RENDER_PORT}) ---")
-    app.run(host='0.0.0.0', port=RENDER_PORT, debug=False, use_reloader=False)
+    print("--- OpenClaw Proxy Active (port 8080) ---")
+    app.run(host='0.0.0.0', port=8080, debug=False, use_reloader=False)
 
 threading.Thread(target=run_proxy, daemon=True).start()
 
@@ -94,30 +87,22 @@ class MyAgent(Agent):
     def __init__(self) -> None:
         super().__init__(instructions=AGENT_INSTRUCTIONS)
 
-server = AgentServer()
-
 @server.rtc_session()
 async def my_agent(ctx: agents.JobContext):
     await ctx.connect()
     
-    # 1. Wait for Config (Metadata can take a moment to propagate)
+    # 1. Get Config (Strictly from metadata passed from frontend localStorage)
     config = None
-    print("[SESSION] Waiting for participant metadata...")
-    
-    for _ in range(10): # Try for 10 seconds
-        for p in ctx.room.remote_participants.values():
-            if p.metadata:
-                try:
-                    config = json.loads(p.metadata)
-                    if config.get("openclawUrl"):
-                        print(f"[SESSION] ✓ Config found for participant {p.identity}")
-                        break
-                except: pass
-        if config: break
-        await asyncio.sleep(1)
+    for p in ctx.room.remote_participants.values():
+        if p.metadata:
+            try:
+                config = json.loads(p.metadata)
+                print(f"[SESSION] ✓ Config from participant metadata")
+                break
+            except: pass
     
     if not config:
-        print(f"[SESSION] ✗ No config found after timeout. Participants: {[p.identity for p in ctx.room.remote_participants.values()]}")
+        print(f"[SESSION] ✗ No config found in participant metadata")
         return
 
     url    = config.get("openclawUrl", "")
@@ -133,7 +118,7 @@ async def my_agent(ctx: agents.JobContext):
 
     openclaw_llm = openai.LLM(
         model="main",
-        base_url=f"http://localhost:{RENDER_PORT}/v1",
+        base_url="http://localhost:8080/v1",
         api_key=mega_token,
     )
 

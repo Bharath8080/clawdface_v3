@@ -122,11 +122,6 @@ uv sync
 1. Start the Frontend: `cd frontend && npm run dev`
 2. Start the Agent: `python agent.py dev`
 
----
-
-## 🚀 Production Deployment (Render/Railway)
-1. Use the **Build Command**: `pip install -r requirements.txt`
-2. Use the **Start Command**: `python agent.py start`
 
 
 ---
