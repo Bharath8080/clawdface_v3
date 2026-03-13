@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useGoogleLogin } from "@react-oauth/google";
-import { saveUser } from "@/lib/auth";
+import { saveUserToLocalStorage as saveUser } from "@/lib/auth";
 
 const GoogleIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24">
