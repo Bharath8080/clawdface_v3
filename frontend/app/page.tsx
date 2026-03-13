@@ -7,12 +7,13 @@ import {
   BarVisualizer,
   DisconnectButton,
   RoomAudioRenderer,
-  RoomContext,
   VideoTrack,
-  VoiceAssistantControlBar,
   useVoiceAssistant,
   useRoomContext,
 } from "@livekit/components-react";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import { RoomContext } from "@livekit/components-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Room, RoomEvent } from "livekit-client";
 import { useCallback, useEffect, useState } from "react";
@@ -21,7 +22,8 @@ import { useRouter } from "next/navigation";
 import { isAuthenticated } from "@/lib/auth";
 import { Sidebar } from "@/components/Sidebar";
 import Image from "next/image";
-import { getUser } from "@/lib/auth";
+import { getUser, updateLastConfig } from "@/lib/auth";
+import { fetchBots, createBot, deleteBot, Bot, supabase } from "@/lib/supabase";
 
 // ─── Session Config Defaults ────────────────────────────────────────────────
 const DEFAULTS = {
@@ -56,23 +58,6 @@ const AVATARS = [
 ];
 
 // ─── Icons ──────────────────────────────────────────────────────────────────
-const LinkIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-  </svg>
-);
-const KeyIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/>
-  </svg>
-);
-const HashIcon2 = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/>
-    <line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>
-  </svg>
-);
 const UserIcon = ({ size = 15 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
@@ -83,6 +68,76 @@ const SmileIcon = ({ size = 15, className = "" }: { size?: number, className?: s
     <circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>
   </svg>
 );
+const LibraryIcon = ({ size = 15, className = "" }: { size?: number, className?: string }) => (
+  <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect width="16" height="20" x="4" y="2" rx="2" ry="2"/>
+    <line x1="8" x2="16" y1="6" y2="6"/>
+    <line x1="8" x2="16" y1="10" y2="10"/>
+    <line x1="8" x2="16" y1="14" y2="14"/>
+    <line x1="8" x2="16" y1="18" y2="18"/>
+  </svg>
+);
+const LinkIcon = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+  </svg>
+);
+const KeyIcon = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+  </svg>
+);
+const HashIcon2 = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/>
+    <line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>
+  </svg>
+);
+const RefreshCwIcon = ({ size = 20, className = "" }: { size?: number, className?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+    <path d="M21 3v5h-5"/>
+    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+    <path d="M3 21v-5h5"/>
+  </svg>
+);
+const TrashIcon = ({ size = 20 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
+  </svg>
+);
+const ClockIcon = ({ size = 20, className = "" }: { size?: number, className?: string }) => (
+  <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+  </svg>
+);
+const MicIcon = ({ size = 20 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>
+  </svg>
+);
+const MicOffIcon = ({ size = 20 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/>
+  </svg>
+);
+const MessageIcon = ({ size = 20 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>
+  </svg>
+);
+const ChevronDownIcon = ({ className = "", size = 14 }: { className?: string, size?: number }) => (
+  <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m6 9 6 6 6-6"/>
+  </svg>
+);
+const CrossIcon = ({ size = 24 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+  </svg>
+);
+// Removed duplicate icons at bottom
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
 export default function Page() {
@@ -95,10 +150,13 @@ export default function Page() {
 
   // Session config state
   const [config, setConfig] = useState<typeof DEFAULTS>(DEFAULTS);
+  const [bots, setBots] = useState<Bot[]>([]);
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const [isLoadingBots, setIsLoadingBots] = useState(false);
 
   // Load config on mount
   useEffect(() => {
-    async function loadConfig() {
+    async function init() {
       // 1. Try localStorage first (fastest)
       const saved = localStorage.getItem("openclaw_config");
       if (saved) {
@@ -108,25 +166,37 @@ export default function Page() {
         } catch (e) {}
       }
 
-      // 2. Fallback to local files (if localStorage is empty, e.g. first run or fresh browser)
+      // 2. Fetch profile and bots
       const user = getUser();
       if (user?.email) {
         try {
-          const url = new URL("/api/user-config", window.location.origin);
-          url.searchParams.set("email", user.email);
-          const resp = await fetch(url.toString());
-          if (resp.ok) {
-            const remoteConfig = await resp.json();
-            if (remoteConfig) {
-              setConfig((prev) => ({ ...prev, ...remoteConfig }));
-              // Keep localStorage in sync
-              localStorage.setItem("openclaw_config", JSON.stringify(remoteConfig));
+          // Sync profile
+          const { data: profile } = await supabase
+            .from('profiles')
+            .upsert({ email: user.email }, { onConflict: 'email' })
+            .select()
+            .single();
+            
+          if (profile) {
+            setProfileId(profile.id);
+            // Fetch bots
+            setIsLoadingBots(true);
+            const userBots = await fetchBots(profile.id);
+            setBots(userBots);
+            setIsLoadingBots(false);
+            
+            // Fetch last config if nothing in localStorage
+            if (!saved && profile.last_config) {
+              setConfig((prev) => ({ ...prev, ...profile.last_config }));
+              localStorage.setItem("openclaw_config", JSON.stringify(profile.last_config));
             }
           }
-        } catch (err) {}
+        } catch (err) {
+          console.error("Initialization error:", err);
+        }
       }
     }
-    loadConfig();
+    init();
   }, []);
 
   useEffect(() => {
@@ -141,9 +211,10 @@ export default function Page() {
     // 1. Persist config to localStorage (Works on Vercel)
     localStorage.setItem("openclaw_config", JSON.stringify(config));
 
-    // 2. Sync to local files (For local dev visibility)
+    // 2. Sync to Supabase & local files
     const user = getUser();
     if (user?.email) {
+      await updateLastConfig(user.email, config);
       try {
         await fetch("/api/user-config", {
           method: "POST",
@@ -151,7 +222,6 @@ export default function Page() {
           body: JSON.stringify({ email: user.email, config }),
         });
       } catch (err) {
-        // Silently ignore sync failures on Vercel
         console.warn("Local sync skipped (expected on production)");
       }
     }
@@ -192,6 +262,31 @@ export default function Page() {
     );
   }
 
+  const handleSaveBot = async () => {
+    if (!profileId) return;
+    setIsLoadingBots(true);
+    try {
+      const selectedAvatar = AVATARS.find(a => a.id === config.avatarId);
+      await createBot({
+        user_id: profileId,
+        name: selectedAvatar ? `${selectedAvatar.name}'s Bot` : "My New Bot",
+        avatar_id: config.avatarId,
+        openclaw_url: config.openclawUrl,
+        gateway_token: config.gatewayToken,
+        session_key: config.sessionKey,
+        voice_id: "default",
+      });
+      // Refresh bots list
+      const userBots = await fetchBots(profileId);
+      setBots(userBots);
+      setActiveSession("Library");
+    } catch (err) {
+      console.error("Failed to save bot:", err);
+    } finally {
+      setIsLoadingBots(false);
+    }
+  };
+
   return (
     <main data-lk-theme="default" className="h-[100dvh] w-screen bg-[#050505] flex overflow-hidden font-[Inter] text-white">
       <Sidebar
@@ -218,6 +313,7 @@ export default function Page() {
         </div>
 
         <div className="flex-1 overflow-hidden relative">
+          {/* @ts-ignore */}
           <RoomContext.Provider value={room}>
             {activeSession === "My Bot" ? (
               <SimpleVoiceAssistant
@@ -225,9 +321,35 @@ export default function Page() {
                 config={config}
                 setConfig={setConfig}
                 onOpenPicker={() => setIsAvatarPickerOpen(true)}
+                onSaveAsBot={handleSaveBot}
+                isSavingBot={isLoadingBots}
               />
             ) : activeSession === "Avatars" ? (
               <AvatarGallery />
+            ) : activeSession === "Library" ? (
+              <BotLibraryView 
+                bots={bots} 
+                profileId={profileId} 
+                onRefresh={async () => {
+                  if (profileId) {
+                    setIsLoadingBots(true);
+                    const userBots = await fetchBots(profileId);
+                    setBots(userBots);
+                    setIsLoadingBots(false);
+                  }
+                }}
+                onSelectBot={(bot) => {
+                  const newConfig = {
+                    openclawUrl: bot.openclaw_url,
+                    gatewayToken: bot.gateway_token,
+                    sessionKey: bot.session_key,
+                    avatarId: bot.avatar_id,
+                  };
+                  setConfig(newConfig);
+                  localStorage.setItem("openclaw_config", JSON.stringify(newConfig));
+                  setActiveSession("My Bot");
+                }}
+              />
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-neutral-400 bg-[#050505] p-6">
                 <div className="text-center space-y-4 max-w-md p-8 border border-white/5 rounded-2xl bg-[#0A0A0A] shadow-2xl relative overflow-hidden">
@@ -270,12 +392,16 @@ function SessionConfigForm({
   onConnect,
   isConnecting,
   onOpenPicker,
+  onSaveAsBot,
+  isSavingBot,
 }: {
   config: typeof DEFAULTS;
   setConfig: (c: typeof DEFAULTS) => void;
   onConnect: () => void;
   isConnecting: boolean;
   onOpenPicker: () => void;
+  onSaveAsBot?: () => void;
+  isSavingBot?: boolean;
 }) {
   const [showToken, setShowToken] = useState(false);
   const selectedAvatar = AVATARS.find(a => a.id === config.avatarId);
@@ -285,7 +411,6 @@ function SessionConfigForm({
     label: string,
     icon: React.ReactNode,
     placeholder: string,
-    type: "text" | "password" = "text",
     prefix?: string
   ) => (
     <div className="flex flex-col gap-1.5">
@@ -322,7 +447,7 @@ function SessionConfigForm({
               </svg>
             ) : (
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <path d="M1 12s4-8 11-8 11-8 11 8-4 8-11 8-11-8-11-8z"/>
                 <circle cx="12" cy="12" r="3"/>
               </svg>
             )}
@@ -342,7 +467,6 @@ function SessionConfigForm({
       className="flex items-center justify-center h-full p-6"
     >
       <div className="w-full max-w-md">
-        {/* Header */}
         <div className="mb-8 text-center">
           <div className="w-14 h-14 rounded-2xl bg-[#1c2e28] flex items-center justify-center mx-auto mb-4 shadow-[0_0_32px_rgba(0,227,170,0.12)]">
             <Image src="/openclaw.png" alt="ClawdFace" width={34} height={34} className="object-contain" />
@@ -351,13 +475,11 @@ function SessionConfigForm({
           <p className="text-[#6b7280] text-[13px] mt-1">Connect to your OpenClaw backend to start the conversation</p>
         </div>
 
-        {/* Form Card */}
         <div className="bg-[#111111] border border-[#1f1f1f] rounded-2xl p-6 flex flex-col gap-5 shadow-2xl">
           {field("openclawUrl",  "OpenClaw URL",     <LinkIcon />,   "http://localhost:18789")}
-          {field("gatewayToken", "Gateway Token",    <KeyIcon />,    "Enter your gateway token", "password")}
-          {field("sessionKey",   "Session Key",      <HashIcon2 />,  "bot-name", "text", "agent:main:")}
+          {field("gatewayToken", "Gateway Token",    <KeyIcon />,    "Enter your gateway token")}
+          {field("sessionKey",   "Session Key",      <HashIcon2 />,  "bot-name", "agent:main:")}
 
-          {/* Avatar Selection */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#6b7280] flex items-center gap-1.5">
               <span className="text-[#9ca3af]"><UserIcon size={14} /></span>
@@ -394,36 +516,53 @@ function SessionConfigForm({
             </button>
           </div>
 
-          {/* Connect Button */}
-          <button
-            onClick={onConnect}
-            disabled={isConnecting || !config.openclawUrl || !config.gatewayToken || !config.sessionKey}
-            className="mt-2 w-full py-3.5 rounded-xl font-bold text-[15px] tracking-wide transition-all duration-200
-              bg-[#00E3AA] text-black hover:bg-[#00c994] active:scale-[0.98]
-              disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100
-              shadow-[0_0_24px_rgba(0,227,170,0.25)] hover:shadow-[0_0_32px_rgba(0,227,170,0.35)]
-              flex items-center justify-center gap-2"
-          >
-            {isConnecting ? (
-              <>
-                <svg className="animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <circle cx="12" cy="12" r="10" opacity="0.25"/>
-                  <path d="M22 12a10 10 0 0 1-10 10" opacity="0.9"/>
+          <div className="flex flex-col gap-3 mt-4">
+            <button
+              onClick={onConnect}
+              disabled={isConnecting || !config.openclawUrl || !config.gatewayToken || !config.sessionKey}
+              className="w-full py-3.5 rounded-xl font-bold text-[15px] tracking-wide transition-all duration-200
+                bg-[#00E3AA] text-black hover:bg-[#00c994] active:scale-[0.98]
+                disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100
+                shadow-[0_0_24px_rgba(0,227,170,0.25)] hover:shadow-[0_0_32px_rgba(0,227,170,0.35)]
+                flex items-center justify-center gap-2"
+            >
+              {isConnecting ? (
+                <>
+                  <svg className="animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <circle cx="12" cy="12" r="10" opacity="0.25"/>
+                    <path d="M22 12a10 10 0 0 1-10 10" opacity="0.9"/>
+                  </svg>
+                  Connecting…
+                </>
+              ) : (
+                <>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="5 3 19 12 5 21 5 3"/>
+                  </svg>
+                  Start Session
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={onSaveAsBot}
+              disabled={isSavingBot || !config.openclawUrl}
+              className="w-full py-3 bg-white/[0.03] hover:bg-white/[0.08] disabled:opacity-40 text-white/90 font-semibold rounded-xl transition-all border border-white/5 hover:border-white/10 text-[14px] flex items-center justify-center gap-2 shadow-sm"
+            >
+              {isSavingBot ? (
+                <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                  <circle cx="12" cy="12" r="10" opacity="0.25"/><path d="M22 12a10 10 0 0 1-10 10" opacity="0.9"/>
                 </svg>
-                Connecting…
-              </>
-            ) : (
-              <>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="5 3 19 12 5 21 5 3"/>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>
                 </svg>
-                Start Session
-              </>
-            )}
-          </button>
+              )}
+              Save as new Bot
+            </button>
+          </div>
         </div>
 
-        {/* Hint */}
         <p className="text-center text-[11px] text-[#3a3a3a] mt-4">
           Config is saved locally and auto-filled next time
         </p>
@@ -445,37 +584,26 @@ function AvatarPickerModal({
   onSelect: (id: string) => void;
 }) {
   const [tempId, setTempId] = useState(currentId);
-
   if (!isOpen) return null;
-
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6">
-      <div 
-        className="absolute inset-0 bg-black/90 backdrop-blur-md" 
-        onClick={onClose} 
-      />
+      <div className="absolute inset-0 bg-black/90 backdrop-blur-md" onClick={onClose} />
       <motion.div 
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         className="w-full max-w-5xl h-[85vh] bg-[#0a0a0a] rounded-3xl border border-white/5 shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col relative"
       >
-        {/* Header */}
         <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between bg-[#111111]/50">
           <div>
             <h2 className="text-xl font-bold text-white">Add Avatar</h2>
             <p className="text-[#6b7280] text-xs mt-0.5">Select an identity for your interaction</p>
           </div>
-          <button 
-            onClick={onClose}
-            className="p-2 hover:bg-white/5 rounded-full text-[#6b7280] hover:text-white transition-colors"
-          >
+          <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full text-[#6b7280] hover:text-white transition-colors">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              <line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/>
             </svg>
           </button>
         </div>
-
-        {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
             {AVATARS.map((avatar) => (
@@ -483,48 +611,19 @@ function AvatarPickerModal({
                 key={avatar.id}
                 onClick={() => setTempId(avatar.id)}
                 className={`group relative rounded-2xl transition-all duration-300 overflow-hidden ${
-                  tempId === avatar.id 
-                    ? "ring-2 ring-[#00E3AA] shadow-[0_0_30px_rgba(0,227,170,0.2)]" 
-                    : "border border-white/5 hover:border-white/10"
+                  tempId === avatar.id ? "ring-2 ring-[#00E3AA] shadow-[0_0_30px_rgba(0,227,170,0.2)]" : "border border-white/5 hover:border-white/10"
                 }`}
               >
                 <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-white/5 shadow-inner">
-                  <img 
-                    src={avatar.image} 
-                    alt={avatar.name} 
-                    className={`w-full h-full object-cover transition-transform duration-500 ${
-                      tempId === avatar.id ? "scale-105" : "group-hover:scale-105"
-                    }`} 
-                    loading="lazy"
-                  />
-                  
-                  {/* Labels as in image overlay */}
-                  <div className="absolute top-2 left-2">
-                    <span className="px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11px] text-white font-semibold border border-white/10 shadow-lg">
-                      {avatar.name}
-                    </span>
-                  </div>
-                  
-                  <div className="absolute top-2 right-2">
-                    <span className="px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11px] text-white/80 font-medium border border-white/10 shadow-lg">
-                      Huma-2
-                    </span>
-                  </div>
-                  
-                  <div className="absolute bottom-3 left-3">
-                    <span className="text-[10px] text-white font-bold uppercase tracking-wider">PRO</span>
-                  </div>
-                  
-                  <div className="absolute bottom-3 right-3">
-                    <span className="text-[10px] text-white/70 font-mono">id:{avatar.id}</span>
-                  </div>
-
+                  <img src={avatar.image} alt={avatar.name} className={`w-full h-full object-cover transition-transform duration-500 ${tempId === avatar.id ? "scale-105" : "group-hover:scale-105"}`} loading="lazy" />
+                  <div className="absolute top-2 left-2"><span className="px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11px] text-white font-semibold border border-white/10 shadow-lg">{avatar.name}</span></div>
+                  <div className="absolute top-2 right-2"><span className="px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11px] text-white/80 font-medium border border-white/10 shadow-lg">Huma-2</span></div>
+                  <div className="absolute bottom-3 left-3"><span className="text-[10px] text-white font-bold uppercase tracking-wider">PRO</span></div>
+                  <div className="absolute bottom-3 right-3"><span className="text-[10px] text-white/70 font-mono">id:{avatar.id}</span></div>
                   {tempId === avatar.id && (
                     <div className="absolute inset-0 bg-[#00E3AA]/10 flex items-center justify-center backdrop-blur-[1px]">
                       <div className="w-10 h-10 rounded-full bg-[#00E3AA] text-black flex items-center justify-center shadow-xl ring-4 ring-[#00E3AA]/20">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12"/>
-                        </svg>
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                       </div>
                     </div>
                   )}
@@ -533,24 +632,9 @@ function AvatarPickerModal({
             ))}
           </div>
         </div>
-
-        {/* Footer */}
         <div className="px-6 py-5 border-t border-white/5 flex items-center justify-between bg-[#111111]/50">
-          <button 
-            onClick={onClose}
-            className="px-6 py-2.5 text-sm font-semibold text-[#9ca3af] hover:text-white transition-colors"
-          >
-            Cancel
-          </button>
-          <button 
-            onClick={() => {
-              onSelect(tempId);
-              onClose();
-            }}
-            className="px-8 py-2.5 rounded-xl bg-[#00E3AA] text-black font-bold text-sm tracking-wide shadow-lg hover:bg-[#00c994] transition-all"
-          >
-            Save Selection
-          </button>
+          <button onClick={onClose} className="px-6 py-2.5 text-sm font-semibold text-[#9ca3af] hover:text-white transition-colors">Cancel</button>
+          <button onClick={() => { onSelect(tempId); onClose(); }} className="px-8 py-2.5 rounded-xl bg-[#00E3AA] text-black font-bold text-sm tracking-wide shadow-lg hover:bg-[#00c994] transition-all">Save Selection</button>
         </div>
       </motion.div>
     </div>
@@ -569,41 +653,15 @@ function AvatarGallery() {
           </h1>
           <p className="text-[#6b7280] mt-2">Design your AI companions with advanced customization</p>
         </header>
-
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 md:gap-8">
           {AVATARS.map((avatar) => (
-            <div
-              key={avatar.id}
-              className="group relative rounded-2xl transition-all duration-300 overflow-hidden border border-white/5 hover:border-white/10"
-            >
+            <div key={avatar.id} className="group relative rounded-2xl transition-all duration-300 overflow-hidden border border-white/5 hover:border-white/10">
               <div className="relative w-full aspect-video">
-                <img 
-                  src={avatar.image} 
-                  alt={avatar.name} 
-                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
-                  loading="lazy"
-                />
-                
-                {/* Labels as in image overlay */}
-                <div className="absolute top-2 left-2">
-                  <span className="px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11px] text-white font-semibold border border-white/10 shadow-lg">
-                    {avatar.name}
-                  </span>
-                </div>
-                
-                <div className="absolute top-2 right-2">
-                  <span className="px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11px] text-white/80 font-medium border border-white/10 shadow-lg">
-                    Huma-2
-                  </span>
-                </div>
-                
-                <div className="absolute bottom-3 left-3">
-                  <span className="text-[10px] text-white font-bold uppercase tracking-wider">PRO</span>
-                </div>
-                
-                <div className="absolute bottom-3 right-3">
-                  <span className="text-[10px] text-white/70 font-mono">id:{avatar.id}</span>
-                </div>
+                <img src={avatar.image} alt={avatar.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" loading="lazy" />
+                <div className="absolute top-2 left-2"><span className="px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11px] text-white font-semibold border border-white/10 shadow-lg">{avatar.name}</span></div>
+                <div className="absolute top-2 right-2"><span className="px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11px] text-white/80 font-medium border border-white/10 shadow-lg">Huma-2</span></div>
+                <div className="absolute bottom-3 left-3"><span className="text-[10px] text-white font-bold uppercase tracking-wider">PRO</span></div>
+                <div className="absolute bottom-3 right-3"><span className="text-[10px] text-white/70 font-mono">id:{avatar.id}</span></div>
               </div>
             </div>
           ))}
@@ -619,11 +677,15 @@ function SimpleVoiceAssistant({
   config,
   setConfig,
   onOpenPicker,
+  onSaveAsBot,
+  isSavingBot,
 }: {
   onConnectButtonClicked: () => void;
   config: typeof DEFAULTS;
   setConfig: (c: typeof DEFAULTS) => void;
   onOpenPicker: () => void;
+  onSaveAsBot?: () => void;
+  isSavingBot?: boolean;
 }) {
   const { state: agentState } = useVoiceAssistant();
   const [isChatVisible, setIsChatVisible] = useState(false);
@@ -670,30 +732,19 @@ function SimpleVoiceAssistant({
             onConnect={handleConnect}
             isConnecting={isConnecting}
             onOpenPicker={onOpenPicker}
+            onSaveAsBot={onSaveAsBot}
+            isSavingBot={isSavingBot}
           />
         ) : (
-          <motion.div
-            key="connected"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex h-full w-full"
-          >
-            {/* Left Main Area */}
+          <motion.div key="connected" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex h-full w-full">
             <main className="flex-1 h-full flex flex-col relative bg-[#000000]">
               <div className="flex-1 flex items-center justify-center p-12">
                 <AgentVisualizer />
               </div>
               <div className="absolute bottom-12 left-0 right-0 flex justify-center">
-                <ControlBar
-                  onConnectButtonClicked={onConnectButtonClicked}
-                  isChatVisible={isChatVisible}
-                  setIsChatVisible={setIsChatVisible}
-                />
+                <ControlBar onConnectButtonClicked={onConnectButtonClicked} isChatVisible={isChatVisible} setIsChatVisible={setIsChatVisible} />
               </div>
             </main>
-
-            {/* Right Sidebar: Chat */}
             <motion.aside
               initial={false}
               animate={{ width: isChatVisible ? chatWidth : 0, opacity: isChatVisible ? 1 : 0 }}
@@ -701,16 +752,12 @@ function SimpleVoiceAssistant({
               className="relative min-w-0 h-full border-l border-white/5 bg-black/10 backdrop-blur-md overflow-hidden flex-shrink-0"
             >
               {isChatVisible && (
-                <div
-                  onPointerDown={handlePointerDown}
-                  className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-10 hover:bg-white/10 active:bg-white/20 transition-colors"
-                />
+                <div onPointerDown={handlePointerDown} className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-10 hover:bg-white/10 active:bg-white/20 transition-colors" />
               )}
               <div style={{ width: chatWidth }} className="h-full">
                 <TranscriptionView />
               </div>
             </motion.aside>
-
             <RoomAudioRenderer />
             <NoAgentNotification state={agentState} />
           </motion.div>
@@ -738,37 +785,6 @@ function AgentVisualizer() {
 }
 
 // ─── Control Bar ─────────────────────────────────────────────────────────────
-const MicIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>
-  </svg>
-);
-const MicOffIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="2" x2="22" y1="2" y2="22"/>
-    <path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/>
-    <path d="M5 10v2a7 7 0 0 0 12 5"/>
-    <path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/>
-    <path d="M9 9v3a3 3 0 0 0 5.12 2.12"/>
-    <line x1="12" x2="12" y1="19" y2="22"/>
-  </svg>
-);
-const MessageIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>
-  </svg>
-);
-const ChevronDownIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m6 9 6 6 6-6"/>
-  </svg>
-);
-const CrossIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
-  </svg>
-);
 
 function ControlBar(props: {
   onConnectButtonClicked: () => void;
@@ -778,40 +794,20 @@ function ControlBar(props: {
   const { state: agentState } = useVoiceAssistant();
   const room = useRoomContext();
   const [isMicEnabled, setIsMicEnabled] = useState(true);
-
   const toggleMic = async () => {
     const enabled = !isMicEnabled;
     setIsMicEnabled(enabled);
     await room.localParticipant.setMicrophoneEnabled(enabled);
   };
-
   if (agentState === "disconnected" || agentState === "connecting") return null;
-
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 20 }}
-      transition={{ duration: 0.4, ease: [0.09, 1.04, 0.245, 1.055] }}
-      className="flex items-center gap-4"
-    >
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} transition={{ duration: 0.4, ease: [0.09, 1.04, 0.245, 1.055] }} className="flex items-center gap-4">
       <div className="control-pill">
-        <button onClick={toggleMic} className="control-button-white">
-          {isMicEnabled ? <MicIcon /> : <MicOffIcon />}
-        </button>
+        <button onClick={toggleMic} className="control-button-white">{isMicEnabled ? <MicIcon /> : <MicOffIcon />}</button>
         <div className="control-dropdown-part"><ChevronDownIcon /></div>
       </div>
-
-      <button
-        onClick={() => props.setIsChatVisible(!props.isChatVisible)}
-        className={`control-circle ${props.isChatVisible ? "active" : ""}`}
-      >
-        <MessageIcon />
-      </button>
-
-      <DisconnectButton className="disconnect-circle">
-        <CrossIcon />
-      </DisconnectButton>
+      <button onClick={() => props.setIsChatVisible(!props.isChatVisible)} className={`control-circle ${props.isChatVisible ? "active" : ""}`}><MessageIcon /></button>
+      <DisconnectButton className="disconnect-circle"><CrossIcon /></DisconnectButton>
     </motion.div>
   );
 }
@@ -819,4 +815,89 @@ function ControlBar(props: {
 function onDeviceFailure(error: Error) {
   console.error(error);
   alert("Error acquiring microphone permissions. Please grant the necessary permissions and reload.");
+}
+
+// ─── Bot Library View ────────────────────────────────────────────────────────
+function BotLibraryView({ 
+  bots, 
+  profileId, 
+  onRefresh, 
+  onSelectBot 
+}: { 
+  bots: Bot[], 
+  profileId: string | null,
+  onRefresh: () => void,
+  onSelectBot: (bot: Bot) => void
+}) {
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("Are you sure you want to delete this bot?")) return;
+    setIsDeleting(id);
+    try {
+      await deleteBot(id);
+      onRefresh();
+    } catch (err) {
+      console.error("Delete failed:", err);
+    } finally {
+      setIsDeleting(null);
+    }
+  };
+  return (
+    <div className="absolute inset-0 overflow-y-auto p-6 md:p-10 custom-scrollbar bg-[#050505] z-10">
+      <div className="max-w-6xl mx-auto pb-20">
+        <header className="mb-10 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-white tracking-tight flex items-center gap-3">
+              <LibraryIcon size={32} className="text-[#00E3AA]" />
+              Bot Library
+            </h1>
+            <p className="text-[#6b7280] mt-2 text-sm">Manage and launch your saved AI companions</p>
+          </div>
+          <button onClick={onRefresh} className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-all border border-white/5"><RefreshCwIcon size={20} /></button>
+        </header>
+
+        {bots.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 border-2 border-dashed border-white/5 rounded-3xl bg-white/[0.02]">
+            <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center text-[#4b5563] mb-4"><LibraryIcon size={32} /></div>
+            <h3 className="text-lg font-semibold text-white">No Bots Saved Yet</h3>
+            <p className="text-[#6b7280] text-[13px] mt-1 max-w-xs text-center">Go to &quot;My Bot&quot; and save your configuration to see it here.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {bots.map((bot) => {
+              const avatar = AVATARS.find(a => a.id === bot.avatar_id);
+              return (
+                <div key={bot.id} onClick={() => onSelectBot(bot)} className="group relative rounded-2xl bg-[#0d0d0d] border border-white/5 hover:border-[#00E3AA]/30 transition-all duration-300 overflow-hidden cursor-pointer flex flex-col shadow-xl hover:shadow-[#00E3AA]/5">
+                  <div className="relative aspect-video w-full overflow-hidden bg-[#111111]">
+                    {avatar ? <img src={avatar.image} alt={bot.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105 opacity-60 group-hover:opacity-80" /> : <div className="w-full h-full flex items-center justify-center text-[#242424]"><UserIcon size={48} /></div>}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-transparent" />
+                    <div className="absolute top-3 right-3 flex gap-2">
+                       <button onClick={(e) => handleDelete(bot.id, e)} className="p-2 rounded-lg bg-black/50 backdrop-blur-md border border-white/10 text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-all z-20">
+                        {isDeleting === bot.id ? <RefreshCwIcon size={14} className="animate-spin" /> : <TrashIcon size={14} />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="p-5 relative">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-lg font-bold text-white tracking-tight truncate pr-4">{bot.name}</h3>
+                      <span className="text-[10px] items-center px-1.5 py-0.5 rounded-md bg-white/5 text-[#00E3AA] font-mono border border-white/5">{bot.avatar_id}</span>
+                    </div>
+                    <div className="space-y-2.5">
+                      <div className="flex items-center gap-2.5 text-[12px] text-[#9ca3af]"><div className="w-5 h-5 rounded-md bg-white/5 flex items-center justify-center text-[#4b5563]"><LinkIcon size={12} /></div><span className="truncate max-w-[180px]">{bot.openclaw_url}</span></div>
+                      <div className="flex items-center gap-2.5 text-[12px] text-[#9ca3af]"><div className="w-5 h-5 rounded-md bg-white/5 flex items-center justify-center text-[#4b5563]"><HashIcon2 size={12} /></div><span className="truncate">{bot.session_key}</span></div>
+                    </div>
+                    <div className="mt-6 flex items-center justify-between pt-4 border-t border-white/5">
+                      <div className="flex items-center gap-1.5 text-[11px] text-[#6b7280]"><ClockIcon size={12} /><span>Saved {new Date(bot.created_at).toLocaleDateString()}</span></div>
+                      <div className="text-[12px] font-bold text-[#00E3AA] uppercase tracking-wider group-hover:translate-x-1 transition-transform flex items-center gap-1">Connect <ChevronDownIcon className="-rotate-90" size={12} /></div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }

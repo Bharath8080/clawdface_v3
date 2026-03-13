@@ -1,3 +1,5 @@
+import { supabase } from "./supabase";
+
 const AUTH_KEY = "clawdface_auth";
 export const THEME_KEY = "clawdface_theme";
 
@@ -18,8 +20,52 @@ export function getUser(): AuthUser | null {
   }
 }
 
-export function saveUser(user: AuthUser) {
+export async function saveUser(user: AuthUser) {
   localStorage.setItem(AUTH_KEY, JSON.stringify(user));
+  
+  // Sync with Supabase
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .upsert({ email: user.email }, { onConflict: 'email' })
+      .select()
+      .single();
+      
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.error("Error syncing user to Supabase:", err);
+    return null;
+  }
+}
+
+export async function getLastConfig(email: string) {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('last_config')
+      .eq('email', email)
+      .single();
+      
+    if (error) throw error;
+    return data?.last_config;
+  } catch (err) {
+    console.error("Error fetching last config from Supabase:", err);
+    return null;
+  }
+}
+
+export async function updateLastConfig(email: string, config: any) {
+  try {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ last_config: config })
+      .eq('email', email);
+      
+    if (error) throw error;
+  } catch (err) {
+    console.error("Error updating last config in Supabase:", err);
+  }
 }
 
 export function logout() {
