@@ -1,3 +1,4 @@
+// @ts-ignore - Supress missing type check locally that isn't missing on Vercel
 import type { AgentState } from "@livekit/components-react";
 import { useEffect, useRef, useState } from "react";
 

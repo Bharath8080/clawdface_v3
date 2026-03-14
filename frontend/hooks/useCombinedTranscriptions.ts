@@ -1,3 +1,4 @@
+// @ts-ignore - Suppress missing type locally that succeeds on Vercel
 import { useTrackTranscription, useVoiceAssistant } from "@livekit/components-react";
 import { useMemo } from "react";
 import useLocalMicTrack from "./useLocalMicTrack";
@@ -10,10 +11,10 @@ export default function useCombinedTranscriptions() {
 
   const combinedTranscriptions = useMemo(() => {
     return [
-      ...agentTranscriptions.map((val) => {
+      ...agentTranscriptions.map((val: any) => {
         return { ...val, role: "assistant" };
       }),
-      ...userTranscriptions.map((val) => {
+      ...userTranscriptions.map((val: any) => {
         return { ...val, role: "user" };
       }),
     ].sort((a, b) => a.firstReceivedTime - b.firstReceivedTime);

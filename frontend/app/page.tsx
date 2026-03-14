@@ -9,7 +9,7 @@ import {
   RoomAudioRenderer,
   VideoTrack,
 } from "@livekit/components-react";
-// @ts-expect-error - Internal context may not be exported in TS declaration
+// @ts-ignore - Internal context may not be exported in TS declaration
 import { RoomContext, useVoiceAssistant, useRoomContext } from "@livekit/components-react";
 import useCombinedTranscriptions from "@/hooks/useCombinedTranscriptions";
 import { AnimatePresence, motion } from "framer-motion";
