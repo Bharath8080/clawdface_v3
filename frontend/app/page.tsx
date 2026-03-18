@@ -151,6 +151,16 @@ const MessageIcon = ({ size = 20 }: { size?: number }) => (
     <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>
   </svg>
 );
+const MailIcon = ({ size = 20 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+  </svg>
+);
+const CheckIcon = ({ size = 16, className = "" }: { size?: number, className?: string }) => (
+  <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12"/>
+  </svg>
+);
 const ChevronDownIcon = ({ className = "", size = 14 }: { className?: string, size?: number }) => (
   <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="m6 9 6 6 6-6"/>
@@ -329,58 +339,57 @@ export default function Page() {
   // Robust Transcription Tracking via Hook
   // (Moved to TranscriptSynchronizer component to stay within RoomContext)
 
-  // Load config on mount
+  // 1. Initial config from localStorage
   useEffect(() => {
-    async function init() {
-      // 1. Try localStorage first (fastest)
-      const saved = localStorage.getItem("openclaw_config");
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (parsed.sessionKey) {
-            parsed.sessionKey = stripSessionKey(parsed.sessionKey);
-          }
-          setConfig({ ...DEFAULTS, ...parsed });
-        } catch (e) {}
-      }
+    const saved = localStorage.getItem("openclaw_config");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.sessionKey) {
+          parsed.sessionKey = stripSessionKey(parsed.sessionKey);
+        }
+        setConfig({ ...DEFAULTS, ...parsed });
+      } catch (e) {}
+    }
+  }, []);
 
-      // 2. Fetch profile and bots
-      const user = getUser();
-      if (user?.email) {
-        try {
-          // Sync profile via Server Action
-          const profile = await syncUserAction(user.email);
-            
-          if (profile) {
-            setProfileId(profile.id);
-            // Fetch bots
-            setIsLoadingBots(true);
-            const userBots = await fetchBots(profile.id);
-            setBots(userBots);
-            setIsLoadingBots(false);
-            
-            // Sync last config from DB
-            if (profile.last_config) {
-              setDbLastConfig(profile.last_config);
+  // 2. Fetch profile and bots once authenticated
+  useEffect(() => {
+    if (authChecked) {
+      const initData = async () => {
+        const user = getUser();
+        if (user?.email) {
+          try {
+            const profile = await syncUserAction(user.email);
+            if (profile) {
+              setProfileId(profile.id);
+              setIsLoadingBots(true);
+              const userBots = await fetchBots(profile.id);
+              setBots(userBots);
+              setIsLoadingBots(false);
               
-              // If nothing in localStorage, initialize form from DB config
-              if (!saved) {
-                const lastCfg = { ...DEFAULTS, ...profile.last_config };
-                if (lastCfg.sessionKey) {
-                  lastCfg.sessionKey = stripSessionKey(lastCfg.sessionKey);
+              if (profile.last_config) {
+                setDbLastConfig(profile.last_config);
+                // If nothing in localStorage, initialize form from DB config
+                if (!localStorage.getItem("openclaw_config")) {
+                  const lastCfg = { ...DEFAULTS, ...profile.last_config };
+                  if (lastCfg.sessionKey) {
+                    lastCfg.sessionKey = stripSessionKey(lastCfg.sessionKey);
+                  }
+                  setConfig(lastCfg);
+                  localStorage.setItem("openclaw_config", JSON.stringify(lastCfg));
                 }
-                setConfig(lastCfg);
-                localStorage.setItem("openclaw_config", JSON.stringify(lastCfg));
               }
             }
+          } catch (err) {
+            console.error("Initialization error:", err);
+            setIsLoadingBots(false);
           }
-        } catch (err) {
-          console.error("Initialization error:", err);
         }
-      }
+      };
+      initData();
     }
-    init();
-  }, []);
+  }, [authChecked]);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -736,7 +745,7 @@ export default function Page() {
                     botName: bot.name,
                   };
                   setConfig(newConfig); // ensure state is updated for dashboard
-                  onConnectButtonClicked();
+                  onConnectButtonClicked(undefined, newConfig);
                   setActiveSession("DirectCall");
                 }}
                 onEditBot={(bot) => {
@@ -1508,6 +1517,8 @@ function BotLibraryView({
   onEditBot: (bot: Bot) => void
 }) {
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
+
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm("Are you sure you want to delete this bot?")) return;
@@ -1521,61 +1532,198 @@ function BotLibraryView({
       setIsDeleting(null);
     }
   };
+
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1,
+        delayChildren: 0.2
+      }
+    }
+  };
+
+  const cardVariants = {
+    hidden: { opacity: 0, y: 30, scale: 0.95 },
+    visible: { 
+      opacity: 1, 
+      y: 0, 
+      scale: 1,
+      transition: { type: "spring", stiffness: 100, damping: 20 }
+    }
+  };
+
   return (
-    <div className="absolute inset-0 overflow-y-auto p-6 md:p-10 custom-scrollbar bg-[#050505] z-10">
-      <div className="max-w-6xl mx-auto pb-20">
-        <header className="mb-10 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-white tracking-tight flex items-center gap-3">
-              <LibraryIcon size={32} className="text-[#00E3AA]" />
-              Bot Library
-            </h1>
-            <p className="text-[#6b7280] mt-2 text-sm">Manage and launch your saved AI companions</p>
+    <div className="absolute inset-0 overflow-y-auto p-6 md:p-12 custom-scrollbar bg-[#050505] z-10">
+      <div className="max-w-7xl mx-auto pb-24">
+        <motion.header 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-14 flex items-end justify-between"
+        >
+          <div className="space-y-1">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-10 rounded-2xl bg-[#00E3AA]/10 flex items-center justify-center border border-[#00E3AA]/20 shadow-[0_0_20px_rgba(0,227,170,0.1)]">
+                <LibraryIcon size={22} className="text-[#00E3AA]" />
+              </div>
+              <h1 className="text-3xl font-bold text-white tracking-tight font-outfit">
+                Bot <span className="text-[#00E3AA]">Library</span>
+              </h1>
+            </div>
+            <p className="text-neutral-500 font-medium text-sm tracking-wide ml-1 font-outfit">
+              Select and deploy your personalized AI agents to any meeting.
+            </p>
           </div>
-          <button onClick={onRefresh} className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-all border border-white/5"><RefreshCwIcon size={20} /></button>
-        </header>
+          
+          <button 
+            onClick={onRefresh} 
+            className="group p-3 rounded-2xl bg-white/[0.03] hover:bg-[#00E3AA]/10 text-neutral-500 hover:text-[#00E3AA] transition-all border border-white/5 hover:border-[#00E3AA]/30 shadow-xl"
+          >
+            <RefreshCwIcon size={20} className="group-hover:rotate-180 transition-transform duration-500" />
+          </button>
+        </motion.header>
 
         {bots.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 border-2 border-dashed border-white/5 rounded-3xl bg-white/[0.02]">
-            <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center text-[#4b5563] mb-4"><LibraryIcon size={32} /></div>
-            <h3 className="text-lg font-semibold text-white">No Bots Saved Yet</h3>
-            <p className="text-[#6b7280] text-[13px] mt-1 max-w-xs text-center">Go to &quot;My Bot&quot; and save your configuration to see it here.</p>
-          </div>
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="flex flex-col items-center justify-center py-32 border border-white/5 rounded-[2.5rem] bg-gradient-to-b from-white/[0.03] to-transparent backdrop-blur-3xl shadow-2xl"
+          >
+            <div className="w-24 h-24 rounded-full bg-white/5 flex items-center justify-center text-neutral-700 mb-8 border border-white/5 relative overflow-hidden group">
+              <div className="absolute inset-0 bg-gradient-to-tr from-[#00E3AA]/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+              <LibraryIcon size={40} />
+            </div>
+            <h3 className="text-2xl font-bold text-white tracking-tight">Your vault is empty</h3>
+            <p className="text-neutral-500 text-[15px] mt-3 max-w-sm text-center font-medium">
+              Create and save your first AI companion from the <span className="text-[#00E3AA]">&quot;Add Bot&quot;</span> lab to see them listed here.
+            </p>
+          </motion.div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <motion.div 
+            key={bots.length}
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-8"
+          >
             {bots.map((bot) => {
               const avatar = AVATARS.find(a => a.id === bot.avatar_id);
               return (
-                <div key={bot.id} onClick={() => onSelectBot(bot)} className="group relative rounded-2xl bg-[#0d0d0d] border border-white/5 hover:border-[#00E3AA]/30 transition-all duration-300 overflow-hidden cursor-pointer flex flex-col shadow-xl hover:shadow-[#00E3AA]/5">
-                  <div className="relative aspect-video w-full overflow-hidden bg-[#111111]">
-                    {avatar ? <img src={avatar.image} alt={bot.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105 opacity-60 group-hover:opacity-80" /> : <div className="w-full h-full flex items-center justify-center text-[#242424]"><UserIcon size={48} /></div>}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-transparent" />
-                    <div className="absolute top-3 right-3 flex gap-2">
-                       <button 
+                <motion.div 
+                  key={bot.id} 
+                  variants={cardVariants}
+                  whileHover={{ y: -10 }}
+                  onClick={() => onSelectBot(bot)} 
+                  className="group relative rounded-[2rem] bg-[#0a0a0a]/80 backdrop-blur-xl border border-white/5 hover:border-[#00E3AA]/40 transition-all duration-500 overflow-hidden cursor-pointer flex flex-col shadow-2xl hover:shadow-[#00E3AA]/10"
+                >
+                  {/* Decorative background glow */}
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-[#00E3AA]/5 rounded-full blur-[60px] pointer-events-none group-hover:bg-[#00E3AA]/10 transition-colors" />
+                  
+                  <div className="relative aspect-[16/10] w-full overflow-hidden bg-black/40">
+                    {avatar ? (
+                      <img 
+                        src={avatar.image} 
+                        alt={bot.name} 
+                        className="w-full h-full object-cover transition-all duration-1000 scale-105 group-hover:scale-110 opacity-100 grayscale-0" 
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-neutral-800"><UserIcon size={56} /></div>
+                    )}
+                    
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/20 to-transparent opacity-90" />
+                    
+                    {/* Floating Controls */}
+                    <div className="absolute top-4 right-4 flex gap-2 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
+                      <button 
                         onClick={(e) => { e.stopPropagation(); onEditBot(bot); }} 
-                        className="p-2 rounded-lg bg-black/50 backdrop-blur-md border border-white/10 text-white/40 hover:text-[#00E3AA] hover:bg-[#00E3AA]/10 transition-all z-20"
-                        title="Edit Bot"
+                        className="p-2.5 rounded-xl bg-black/40 backdrop-blur-xl border border-white/10 text-white/50 hover:text-white hover:bg-[#00E3AA]/20 hover:border-[#00E3AA]/40 transition-all"
+                        title="Edit Configuration"
                       >
-                        <SettingsIcon size={14} />
+                        <SettingsIcon size={16} />
                       </button>
-                       <button onClick={(e) => handleDelete(bot.id, e)} className="p-2 rounded-lg bg-black/50 backdrop-blur-md border border-white/10 text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-all z-20">
-                        {isDeleting === bot.id ? <RefreshCwIcon size={14} className="animate-spin" /> : <TrashIcon size={14} />}
+                      <button 
+                        onClick={(e) => handleDelete(bot.id, e)} 
+                        className="p-2.5 rounded-xl bg-black/40 backdrop-blur-xl border border-white/10 text-white/50 hover:text-red-500 hover:bg-red-500/10 hover:border-red-500/40 transition-all"
+                        title="Delete Bot"
+                      >
+                        {isDeleting === bot.id ? <RefreshCwIcon size={16} className="animate-spin" /> : <TrashIcon size={16} />}
                       </button>
+                    </div>
+
+                    {/* Bot Name Badge (Bottom Left) */}
+                    <div className="absolute bottom-4 left-6">
+                      <h3 className="text-xl font-bold text-white tracking-tight group-hover:text-[#00E3AA] transition-colors font-outfit">
+                        {bot.name || "Unnamed Bot"}
+                      </h3>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <div className="w-1.5 h-1.5 rounded-full bg-[#00E3AA] shadow-[0_0_8px_rgba(0,227,170,0.6)]" />
+                        <span className="text-[9px] text-neutral-400 font-semibold uppercase tracking-wider font-outfit">Configured Identity</span>
+                      </div>
                     </div>
                   </div>
-                  <div className="p-5 relative">
-                    <div className="flex flex-col mb-3">
-                      <h3 className="text-lg font-bold text-[#00E3AA] tracking-tight truncate pr-4">
-                        {bot.name || "My Bot"}
-                      </h3>
-                      <span className="text-[11px] text-neutral-500 font-mono uppercase tracking-wider">Video Companion</span>
+
+                  <div className="p-6 pt-2 relative">
+                    <div className="space-y-3">
+                      {/* Identity Section */}
+                      <div className="space-y-4 px-1 pt-4">
+                        {/* URL Source */}
+                        <div className="flex items-center gap-3 px-1 text-[12px] text-neutral-500">
+                          <span className="text-neutral-700"><LinkIcon size={14} /></span>
+                          <span className="truncate italic font-medium">{bot.openclaw_url}</span>
+                        </div>
+
+                        {/* Avatar Info */}
+                        <div className="flex items-center gap-3">
+                          <div className="w-6 h-6 rounded-lg bg-neutral-800 flex items-center justify-center text-neutral-400">
+                            <UserIcon size={14} />
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-[9px] text-neutral-600 font-bold uppercase tracking-tighter leading-none font-outfit">Avatar Id</span>
+                            <span className="text-[12px] text-neutral-300 font-jetbrains-mono font-medium truncate">{bot.avatar_id}</span>
+                          </div>
+                        </div>
+
+                        {/* Email Info */}
+                        {bot.agent_email && (
+                          <div className="flex items-center justify-between group/email py-2 px-3 rounded-xl bg-[#00E3AA]/5 border border-[#00E3AA]/10 hover:border-[#00E3AA]/30 transition-all shadow-inner relative">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-6 h-6 rounded-lg bg-[#00E3AA]/10 flex items-center justify-center text-[#00E3AA] shrink-0">
+                                <MailIcon size={12} />
+                              </div>
+                              <span className="text-[12px] text-[#00E3AA] font-bold font-jetbrains-mono truncate lowercase tracking-tight">
+                                {bot.agent_email}
+                              </span>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigator.clipboard.writeText(bot.agent_email);
+                                setCopiedEmail(bot.agent_email);
+                                setTimeout(() => setCopiedEmail(null), 2000);
+                              }}
+                              className={`p-1.5 rounded-lg transition-all ${
+                                copiedEmail === bot.agent_email 
+                                  ? "text-[#00E3AA] bg-[#00E3AA]/20 opacity-100" 
+                                  : "text-neutral-500 hover:text-white transition-all opacity-0 group-hover/email:opacity-100"
+                              }`}
+                            >
+                              {copiedEmail === bot.agent_email ? <CheckIcon size={14} /> : <span className="rotate-45 block"><LinkIcon size={14} /></span>}
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div className="space-y-2.5">
-                      <div className="flex items-center gap-2.5 text-[12px] text-[#9ca3af]"><div className="w-5 h-5 rounded-md bg-white/5 flex items-center justify-center text-[#4b5563]"><LinkIcon size={12} /></div><span className="truncate max-w-[180px]">{bot.openclaw_url}</span></div>
-                      <div className="flex items-center gap-2.5 text-[12px] text-[#9ca3af]"><div className="w-5 h-5 rounded-md bg-white/5 flex items-center justify-center text-[#4b5563]"><UserIcon size={12} /></div><span className="truncate">Avatar: {bot.avatar_id}</span></div>
-                    </div>
-                    <div className="mt-6 flex items-center justify-between pt-4 border-t border-white/5">
-                      <div className="flex items-center gap-1.5 text-[11px] text-[#00E3AA]/80 font-semibold uppercase tracking-wider"><ClockIcon size={12} /><span>Saved {new Date(bot.created_at).toLocaleDateString()}</span></div>
+
+                    <div className="mt-8 flex items-center justify-between px-1">
+                      <div className="flex flex-col">
+                        <span className="text-[9px] text-neutral-600 font-bold uppercase tracking-tighter font-outfit">Creation Date</span>
+                        <div className="flex items-center gap-1.5 text-[11px] text-neutral-400 font-bold font-jetbrains-mono">
+                          <span className="text-neutral-700"><ClockIcon size={12} /></span>
+                          <span>{new Date(bot.created_at).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+
                       <div className="flex items-center gap-2">
                         <button 
                           onClick={(e) => {
@@ -1583,30 +1731,31 @@ function BotLibraryView({
                             const newConfig = {
                               openclawUrl: bot.openclaw_url,
                               gatewayToken: bot.gateway_token,
-                              sessionKey: "", // Automatically generated on connect
+                              sessionKey: "", 
                               avatarId: bot.avatar_id,
                               botName: bot.name,
                             };
                             (window as any).openRecallWithConfig?.(newConfig);
                           }}
-                          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/50 hover:text-white border border-white/5 transition-all"
-                          title="Generate Recall URL"
+                          className="p-3 rounded-2xl bg-white/5 hover:bg-white/10 text-neutral-500 hover:text-white border border-white/5 shadow-lg transition-all group/recall"
+                          title="Generate Automated URL"
                         >
-                          <LinkIcon size={14} />
+                          <span className="group-hover/recall:scale-110 transition-transform block"><LinkIcon size={16} /></span>
                         </button>
-                        <button className="px-4 py-1.5 rounded-lg bg-[#00E3AA] hover:bg-[#00c994] text-black text-[12px] font-bold uppercase tracking-wider transition-all transform hover:scale-105 active:scale-95 shadow-[0_4px_12px_rgba(0,227,170,0.2)] flex items-center gap-1.5">
-                          Connect 
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        
+                        <button className="h-10 px-5 rounded-xl bg-[#00E3AA] hover:bg-[#00ffd0] text-black text-[12px] font-bold uppercase tracking-widest transition-all transform hover:scale-[1.02] active:scale-95 shadow-[0_4px_12px_rgba(0,227,170,0.2)] flex items-center gap-2">
+                          Connect
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
                             <polygon points="5 3 19 12 5 21 5 3"/>
                           </svg>
                         </button>
                       </div>
                     </div>
                   </div>
-                </div>
+                </motion.div>
               );
             })}
-          </div>
+          </motion.div>
         )}
       </div>
     </div>

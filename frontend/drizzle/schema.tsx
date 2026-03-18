@@ -16,6 +16,7 @@ export const bots = pgTable('bots', {
   openclaw_url: text('openclaw_url'),
   gateway_token: text('gateway_token'),
   session_key: text('session_key'),
+  agent_email: text('agent_email'), // Direct link to the bridge email
   created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updated_at: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
@@ -30,4 +31,18 @@ export const conversations = pgTable('conversations', {
   duration: text('duration'),
   transcript: jsonb('transcript').default([]),
   created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export const agents = pgTable('agents', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: text('email').unique().notNull(),
+  name: text('name').notNull(),
+  avatar_id: text('avatar_id').notNull(),
+  openclaw_url: text('openclaw_url').notNull(),
+  gateway_token: text('gateway_token').notNull(),
+  agent_type: text('agent_type').default('openclaw'),
+  config: jsonb('config').default({}),
+  bot_id: uuid('bot_id').references(() => bots.id), // Back-reference to the bot library
+  created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updated_at: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });

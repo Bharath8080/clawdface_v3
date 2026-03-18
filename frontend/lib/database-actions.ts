@@ -12,6 +12,7 @@ export interface Bot {
   openclaw_url: string;
   gateway_token: string;
   session_key: string;
+  agent_email: string; // New field
   created_at: string;
   updated_at: string;
 }
@@ -44,12 +45,14 @@ export async function fetchBotsAction(userId: string): Promise<Bot[]> {
     openclaw_url: bot.openclaw_url || '',
     gateway_token: bot.gateway_token || '',
     session_key: bot.session_key || '',
+    agent_email: bot.agent_email || '',
     created_at: bot.created_at?.toISOString() || '',
     updated_at: bot.updated_at?.toISOString() || '',
   })) as Bot[];
 }
 
 export async function createBotAction(bot: Partial<Bot>) {
+  // 1. Initial insert of the bot
   const [data] = await db
     .insert(bots)
     .values({
@@ -62,9 +65,40 @@ export async function createBotAction(bot: Partial<Bot>) {
       session_key: bot.session_key,
     })
     .returning();
+
+  // 2. Register with Agent Bridge to get a unique email
+  let agentEmail = '';
+  try {
+    const appUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
+    const response = await fetch(`${appUrl}/api/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: data.name,
+        avatarId: data.avatar_id,
+        openclawUrl: data.openclaw_url,
+        gatewayToken: data.gateway_token,
+        botId: data.id,
+      }),
+    });
+
+    if (response.ok) {
+      const agentData = await response.json();
+      agentEmail = agentData.email;
+      
+      // Update bot with the assigned email
+      await db
+        .update(bots)
+        .set({ agent_email: agentEmail })
+        .where(eq(bots.id, data.id));
+    }
+  } catch (err) {
+    console.error('Failed to register agent bridge:', err);
+  }
     
   return {
     ...data,
+    agent_email: agentEmail,
     created_at: data.created_at?.toISOString(),
     updated_at: data.updated_at?.toISOString(),
   };
