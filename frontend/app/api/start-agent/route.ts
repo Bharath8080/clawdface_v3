@@ -55,46 +55,14 @@ export async function POST(request: Request) {
       `&gatewayToken=${agent.gateway_token}` +
       `&sessionKey=${sessionKey}`;
 
-    // 5. Optionally trigger Recall.ai automated joining
-    const recallToken = process.env.RECALL_API_TOKEN;
-    let recallStatus = 'skipped';
-    let recallBotId = null;
-
-    if (recallToken && meetingUrl) {
-      try {
-        const recallResponse = await fetch('https://api.recall.ai/api/v1/bot/', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Token ${recallToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            meeting_url: meetingUrl,
-            bot_name: agent.name,
-            video_url: videoUrl,
-          }),
-        });
-
-        if (recallResponse.ok) {
-          const recallData = await recallResponse.json();
-          recallStatus = 'success';
-          recallBotId = recallData.id;
-        } else {
-          const errorData = await recallResponse.text();
-          console.error('Recall.ai Error:', errorData);
-          recallStatus = 'failed';
-        }
-      } catch (err) {
-        console.error('Failed to trigger Recall.ai:', err);
-        recallStatus = 'error';
-      }
-    }
-
+    // 5. Return metadata to the caller (external system handles Recall.ai)
     return NextResponse.json({ 
       videoUrl, 
-      recallStatus,
-      recallBotId,
       userEmail: userEmail || null,
+      agentName: agent.name,
+      avatarId: agent.avatar_id,
+      roomId,
+      sessionKey
     });
   } catch (error: any) {
     console.error('Error starting agent:', error);
