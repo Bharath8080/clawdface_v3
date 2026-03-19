@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db, agents } from '@/drizzle';
+import { db, agents, bots, profiles } from '@/drizzle';
 import { eq } from 'drizzle-orm';
 
 export async function GET(
@@ -13,15 +13,23 @@ export async function GET(
       return NextResponse.json({ error: 'Missing email parameter' }, { status: 400 });
     }
 
-    const [agent] = await db
-      .select()
+    // Join agents -> bots -> profiles to get the owner email
+    const [result] = await db
+      .select({
+        agent: agents,
+        userEmail: profiles.email,
+      })
       .from(agents)
+      .leftJoin(bots, eq(agents.bot_id, bots.id))
+      .leftJoin(profiles, eq(bots.user_id, profiles.id))
       .where(eq(agents.email, email))
       .limit(1);
 
-    if (!agent) {
+    if (!result || !result.agent) {
       return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
     }
+
+    const { agent, userEmail } = result;
 
     return NextResponse.json({
       id: agent.id,
@@ -32,6 +40,7 @@ export async function GET(
       gatewayToken: agent.gateway_token,
       agentType: agent.agent_type,
       config: agent.config,
+      userEmail: userEmail || null, // The owner's email
       created_at: agent.created_at,
       updated_at: agent.updated_at,
     });
