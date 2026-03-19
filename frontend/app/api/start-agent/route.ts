@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db, agents } from '@/drizzle';
+import { db, agents, bots, profiles } from '@/drizzle';
 import { eq } from 'drizzle-orm';
 
 // Helper for timestamp-based IDs
@@ -20,16 +20,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing email' }, { status: 400 });
     }
 
-    // 1. Fetch agent config from DB using email
-    const [agent] = await db
-      .select()
+    // 1. Fetch agent config AND owner email from DB using email
+    const [result] = await db
+      .select({
+        agent: agents,
+        userEmail: profiles.email,
+      })
       .from(agents)
+      .leftJoin(bots, eq(agents.bot_id, bots.id))
+      .leftJoin(profiles, eq(bots.user_id, profiles.id))
       .where(eq(agents.email, email))
       .limit(1);
 
-    if (!agent) {
+    if (!result || !result.agent) {
       return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
     }
+
+    const { agent, userEmail } = result;
 
     // 2. Auto-generate roomId and sessionKey
     const roomId = generateTimestampId('room');
@@ -86,7 +93,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ 
       videoUrl, 
       recallStatus,
-      recallBotId
+      recallBotId,
+      userEmail: userEmail || null,
     });
   } catch (error: any) {
     console.error('Error starting agent:', error);
