@@ -156,7 +156,7 @@ async def my_agent(ctx: agents.JobContext):
     await trugen_avatar.start(session, room=ctx.room)
  
     await session.start(room=ctx.room, agent=MyAgent())
-    session.say("Hello! I'm ready to chat.")
+    session.say("Hello! Let’s get started.")
  
 if __name__ == "__main__":
     import sys

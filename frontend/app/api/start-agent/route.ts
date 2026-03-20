@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+// This API is currently passive: it returns a videoUrl and agent metadata for external Recall.ai integration.
 import { db, agents, bots, profiles } from '@/drizzle';
 import { eq } from 'drizzle-orm';
 
