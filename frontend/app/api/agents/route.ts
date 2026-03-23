@@ -10,8 +10,8 @@ function generateAgentEmail(name: string): string {
     .slice(0, 16) // YYYY-MM-DDTHH:mm
     .replace(/:/g, '')
     .replace('T', '-');
-  const randomSuffix = Math.random().toString(36).substring(2, 6);
-  return `${cleanName}-${timestamp}-${randomSuffix}@clawdface.ai`;
+  // Removed random suffix to strictly match requested format
+  return `${cleanName}-${timestamp}clawdfaceai@agent.truhire.ai`;
 }
 
 export async function POST(request: Request) {

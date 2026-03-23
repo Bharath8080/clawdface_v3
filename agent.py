@@ -1,13 +1,20 @@
 import os
+import typing
 import json
 import requests
 import asyncio
 import threading
+import base64
+import logging
 from flask import Flask, request, Response
 from dotenv import load_dotenv
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.util.types import AttributeValue
 from livekit import agents
-from livekit.agents import Agent, AgentServer, AgentSession
+from livekit.agents import Agent, AgentServer, AgentSession, cli, metrics
+from livekit.agents.telemetry import set_tracer_provider
 from livekit.plugins import elevenlabs, openai, trugen, groq, silero
+from langfuse import Langfuse
  
 load_dotenv()
  
@@ -77,7 +84,36 @@ def run_proxy():
     app.run(host='0.0.0.0', port=4041, debug=False, use_reloader=False)
  
 threading.Thread(target=run_proxy, daemon=True).start()
- 
+ # --- TRACING SETUP (Langfuse) ---
+def setup_langfuse(
+    metadata: dict[str, AttributeValue] | None = None,
+    *,
+    host: str | None = None,
+    public_key: str | None = None,
+    secret_key: str | None = None,
+) -> TracerProvider:
+    public_key = public_key or os.getenv("LANGFUSE_PUBLIC_KEY")
+    secret_key = secret_key or os.getenv("LANGFUSE_SECRET_KEY")
+    host = host or os.getenv("LANGFUSE_HOST") or os.getenv("LANGFUSE_BASE_URL")
+
+    if not public_key or not secret_key or not host:
+        raise ValueError(
+            "LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, and LANGFUSE_HOST (or LANGFUSE_BASE_URL) must be set"
+        )
+
+    trace_provider = TracerProvider()
+    set_tracer_provider(trace_provider, metadata=metadata)
+
+    Langfuse(
+        public_key=public_key,
+        secret_key=secret_key,
+        base_url=host,
+        tracer_provider=trace_provider,
+        should_export_span=lambda span: True,
+    )
+
+    return trace_provider
+
 # --- LIVEKIT AGENT ---
 AGENT_INSTRUCTIONS = (
     "You are a helpful AI assistant. Keep responses to 2-4 short spoken sentences. "
@@ -92,8 +128,20 @@ server = AgentServer()
  
 @server.rtc_session()
 async def my_agent(ctx: agents.JobContext):
+    # Setup Tracing
+    trace_provider = setup_langfuse(
+        metadata={
+            "langfuse.session.id": ctx.room.name,
+        }
+    )
+
+    async def flush_trace():
+        trace_provider.force_flush()
+
+    ctx.add_shutdown_callback(flush_trace)
+
     await ctx.connect()
-   
+
     # 1. Get Config (Strictly from metadata passed from frontend localStorage)
     config = None
     for p in ctx.room.remote_participants.values():
@@ -141,7 +189,7 @@ async def my_agent(ctx: agents.JobContext):
         api_key=mega_token,
     )
 
-    # 4. Simple AgentSession setup
+    # 4. AgentSession setup
     session = AgentSession(
         stt=groq.STT(model="whisper-large-v3-turbo"),
         vad=silero.VAD.load(),
@@ -151,12 +199,42 @@ async def my_agent(ctx: agents.JobContext):
             model="eleven_flash_v2_5",
         ),
     )
+
+    # 5. Enhanced Observability
+    tracer = trace_provider.get_tracer(__name__)
+
+    @session.on("user_input_transcribed")
+    def on_user_speech(msg: agents.llm.ChatMessage):
+        if msg.content and isinstance(msg.content, str):
+            with tracer.start_as_current_span(
+                "user_transcript",
+                attributes={"langfuse.message.role": "user", "langfuse.message.content": msg.content}
+            ):
+                pass
+
+    @session.on("agent_state_changed")
+    def on_agent_state(state: typing.Any):
+        # Optional: track state changes like 'speaking', 'listening'
+        pass
+
+    @session.on("metrics_collected")
+    def on_metrics(m: typing.Any):
+        # Already handled by OTel exporter, but good for custom spans if needed
+        pass
    
     trugen_avatar = trugen.AvatarSession(avatar_id=avatar_id)
     await trugen_avatar.start(session, room=ctx.room)
  
-    await session.start(room=ctx.room, agent=MyAgent())
-    session.say("Hello! Let’s get started.")
+    try:
+        await session.start(room=ctx.room, agent=MyAgent())
+        session.say("Hello! Let’s get started.")
+    except Exception as e:
+        with tracer.start_as_current_span(
+            "agent_error",
+            attributes={"error": str(e), "type": type(e).__name__}
+        ):
+            print(f"[SESSION] ✗ Error: {e}")
+            raise e
  
 if __name__ == "__main__":
     import sys
