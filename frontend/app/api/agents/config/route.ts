@@ -27,12 +27,8 @@ export async function GET(request: Request) {
       .limit(1);
 
     if (!agent) {
-      console.warn(`[API] Agent not found for email: [${email}]`);
-      return NextResponse.json({ 
-        error: 'Agent not found', 
-        receivedEmail: email,
-        suggestion: "Ensure the email matches EXACTLY including casing and dashes"
-      }, { status: 404 });
+      console.warn(`[API] Agent not found for email: ${email}`);
+      return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
     }
 
     console.log(`[API] Found config for agent: ${agent.name}`);
