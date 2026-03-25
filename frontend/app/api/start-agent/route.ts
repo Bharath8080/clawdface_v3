@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-// This API is currently passive: it returns a videoUrl and agent metadata for external Recall.ai integration.
+// This API handles generating meeting URLs for an agent and explicitly dispatching the agent to the LiveKit room.
 import { db, agents, bots, profiles } from '@/drizzle';
 import { eq } from 'drizzle-orm';
+import { RoomServiceClient, AgentDispatchClient } from 'livekit-server-sdk';
 
 // Helper for timestamp-based IDs
 function generateTimestampId(prefix: string): string {
@@ -43,11 +44,49 @@ export async function POST(request: Request) {
     const roomId = generateTimestampId('room');
     const sessionKey = generateTimestampId('session');
 
-    // 3. URL-encode the openclawUrl
+    // 3. Explicitly create room and dispatch agent
+    const API_KEY     = process.env.LIVEKIT_API_KEY;
+    const API_SECRET  = process.env.LIVEKIT_API_SECRET;
+    const LIVEKIT_URL = process.env.LIVEKIT_URL;
+
+    if (!LIVEKIT_URL || !API_KEY || !API_SECRET) {
+      return NextResponse.json({ error: 'LiveKit configuration is missing' }, { status: 500 });
+    }
+
+    const roomService = new RoomServiceClient(LIVEKIT_URL, API_KEY, API_SECRET);
+    const dispatchClient = new AgentDispatchClient(LIVEKIT_URL, API_KEY, API_SECRET);
+
+    try {
+      await roomService.createRoom({
+        name: roomId,
+        emptyTimeout: 10 * 60, // 10 minutes
+        maxParticipants: 10,
+      });
+
+      const metadata = JSON.stringify({
+        openclawUrl: agent.openclaw_url || "",
+        gatewayToken: agent.gateway_token || "",
+        sessionKey: sessionKey || "",
+        avatarId: agent.avatar_id || "",
+      });
+
+      await dispatchClient.createDispatch(roomId, "clawdface", { metadata });
+      console.log(`[start-agent] Explicitly dispatched 'clawdface' to room ${roomId}`);
+    } catch (err: any) {
+      console.error("[start-agent] Failed to create room or dispatch agent:", err);
+      // It's critical the agent is dispatched, fail the request if it doesn't work.
+      return NextResponse.json({ error: 'Failed to deploy agent to room: ' + err.message }, { status: 500 });
+    }
+
+    // 4. URL-encode the openclawUrl
     const encodedUrl = encodeURIComponent(agent.openclaw_url);
 
-    // 4. Construct the full video URL
-    const baseAppUrl = process.env.APP_BASE_URL || 'https://clawdface-v2-3hfw.vercel.app';
+    // 5. Construct the full video URL
+    const baseAppUrl = process.env.NEXT_PUBLIC_APP_URL;
+
+    if (!baseAppUrl) {
+      return NextResponse.json({ error: 'NEXT_PUBLIC_APP_URL configuration is missing' }, { status: 500 });
+    }
     
     const videoUrl = `${baseAppUrl}/avatar` +
       `?room=${roomId}` +

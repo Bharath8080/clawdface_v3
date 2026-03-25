@@ -1,4 +1,5 @@
-import { AccessToken, AccessTokenOptions, VideoGrant } from "livekit-server-sdk";
+import { AccessToken, AccessTokenOptions } from "livekit-server-sdk";
+import { RoomAgentDispatch, RoomConfiguration } from "@livekit/protocol";
 import { NextResponse } from "next/server";
 
 const API_KEY     = process.env.LIVEKIT_API_KEY!;
@@ -87,5 +88,16 @@ function createParticipantToken(
     canPublishData: true,
     canSubscribe: true,
   });
+
+  // Since we named the agent 'clawdface', automatic dispatch is disabled.
+  // We must explicitly dispatch it when the participant joins.
+  at.roomConfig = new RoomConfiguration({
+    agents: [
+      new RoomAgentDispatch({
+        agentName: 'clawdface',
+      }),
+    ],
+  });
+
   return at.toJwt();
 }

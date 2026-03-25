@@ -295,7 +295,7 @@ class MyAgent(Agent):
 
 server = AgentServer()
 
-@server.rtc_session()
+@server.rtc_session(agent_name="clawdface")
 async def my_agent(ctx: agents.JobContext):
     await ctx.connect()
 
