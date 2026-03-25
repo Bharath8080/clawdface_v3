@@ -1,7 +1,8 @@
 "use server";
 
-import { db, bots, conversations, profiles } from '../drizzle';
+import { db, bots, conversations, profiles, agents } from '../drizzle';
 import { eq, desc } from 'drizzle-orm';
+import { generateAgentEmail } from './utils';
 
 export interface Bot {
   id: string;
@@ -52,7 +53,10 @@ export async function fetchBotsAction(userId: string): Promise<Bot[]> {
 }
 
 export async function createBotAction(bot: Partial<Bot>) {
-  // 1. Initial insert of the bot
+  // 1. Generate the unique agent email first
+  const agentEmail = generateAgentEmail(bot.name || 'Bot');
+
+  // 2. Insert into the main 'bots' library table
   const [data] = await db
     .insert(bots)
     .values({
@@ -63,37 +67,26 @@ export async function createBotAction(bot: Partial<Bot>) {
       openclaw_url: bot.openclaw_url,
       gateway_token: bot.gateway_token,
       session_key: bot.session_key,
+      agent_email: agentEmail,
     })
     .returning();
 
-  // 2. Register with Agent Bridge to get a unique email
-  let agentEmail = '';
+  // 3. Directly register with the 'agents' table (for external Bridge API access)
+  // This avoids unreliable self-requests to /api/agents on Vercel
   try {
-    const appUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
-    const response = await fetch(`${appUrl}/api/agents`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    await db
+      .insert(agents)
+      .values({
+        email: agentEmail,
         name: data.name,
-        avatarId: data.avatar_id,
-        openclawUrl: data.openclaw_url,
-        gatewayToken: data.gateway_token,
-        botId: data.id,
-      }),
-    });
-
-    if (response.ok) {
-      const agentData = await response.json();
-      agentEmail = agentData.email;
-      
-      // Update bot with the assigned email
-      await db
-        .update(bots)
-        .set({ agent_email: agentEmail })
-        .where(eq(bots.id, data.id));
-    }
+        avatar_id: data.avatar_id || '',
+        openclaw_url: data.openclaw_url || '',
+        gateway_token: data.gateway_token || '',
+        agent_type: 'openclaw',
+        bot_id: data.id,
+      });
   } catch (err) {
-    console.error('Failed to register agent bridge:', err);
+    console.error('Failed to create agent record:', err);
   }
     
   return {
@@ -107,6 +100,7 @@ export async function createBotAction(bot: Partial<Bot>) {
 export async function updateBotAction(id: string, updates: Partial<Bot>) {
   const { created_at, id: botId, ...filteredUpdates } = updates;
 
+  // 1. Update the bot library record
   const [data] = await db
     .update(bots)
     .set({ 
@@ -115,6 +109,25 @@ export async function updateBotAction(id: string, updates: Partial<Bot>) {
     } as any)
     .where(eq(bots.id, id))
     .returning();
+
+  // 2. Sync changes to the 'agents' table if it has an assigned email
+  // This ensures zero-config lookups stay up to date
+  if (data.agent_email) {
+    try {
+      await db
+        .update(agents)
+        .set({
+          name: data.name,
+          avatar_id: data.avatar_id || '',
+          openclaw_url: data.openclaw_url || '',
+          gateway_token: data.gateway_token || '',
+          updated_at: new Date()
+        })
+        .where(eq(agents.email, data.agent_email));
+    } catch (err) {
+      console.error('Failed to sync agent record:', err);
+    }
+  }
     
   return {
     ...data,
@@ -124,6 +137,12 @@ export async function updateBotAction(id: string, updates: Partial<Bot>) {
 }
 
 export async function deleteBotAction(id: string) {
+  // 1. Delete associated agents first to avoid FK violation
+  await db
+    .delete(agents)
+    .where(eq(agents.bot_id, id));
+
+  // 2. Now delete the bot from library
   await db
     .delete(bots)
     .where(eq(bots.id, id));

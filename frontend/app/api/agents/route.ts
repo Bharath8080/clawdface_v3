@@ -2,17 +2,7 @@ import { NextResponse } from 'next/server';
 import { db, agents, bots, profiles } from '@/drizzle';
 import { eq } from 'drizzle-orm';
 
-// Helper to generate unique timestamped emails
-function generateAgentEmail(name: string): string {
-  const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const now = new Date();
-  const timestamp = now.toISOString()
-    .slice(0, 16) // YYYY-MM-DDTHH:mm
-    .replace(/:/g, '')
-    .replace('T', '-');
-  // Removed random suffix to strictly match requested format
-  return `${cleanName}-${timestamp}clawdfaceai@agent.truhire.ai`;
-}
+import { generateAgentEmail } from '@/lib/utils';
 
 export async function POST(request: Request) {
   try {
