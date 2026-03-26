@@ -61,7 +61,7 @@ def chat_proxy():
         resp = requests.post(
             f"{target_url}/v1/chat/completions",
             headers=headers,
-            json={"model": "main", "messages": new_messages, "stream": data.get("stream", True)},
+            json={"model": "openclaw", "messages": new_messages, "stream": data.get("stream", True)},
             stream=True,
             timeout=30
         )
@@ -370,7 +370,7 @@ async def my_agent(ctx: agents.JobContext):
     # 4. Build LLM via Mega-Token (URL | gateway token | session key)
     mega_token = f"{url}|{token}|{key}"
     openclaw_llm = openai.LLM(
-        model="main",
+        model="openclaw",
         base_url="http://localhost:4041/v1",
         api_key=mega_token,
     )
