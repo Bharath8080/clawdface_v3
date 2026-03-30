@@ -143,18 +143,23 @@ class RecallSpeechStream(stt.SpeechStream):
         super().__init__(stt=stt, conn_options=conn_options)
         self._ctx = ctx
         self._recall_bot_id = recall_bot_id
+        self._speaking = False
 
     def _emit_final(self, text: str):
         if not text: return
-        # Correct pipeline order: START_OF_SPEECH -> END_OF_SPEECH -> FINAL_TRANSCRIPT
-        # This matches what the LiveKit agents pipeline expects for turn completion.
-        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH, alternatives=[]))
+        if not self._speaking:
+            self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH, alternatives=[]))
+            self._speaking = True
+        
         self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.END_OF_SPEECH, alternatives=[stt.SpeechData(text=text, language="en")]))
         self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.FINAL_TRANSCRIPT, alternatives=[stt.SpeechData(text=text, language="en")]))
+        self._speaking = False
 
     def _emit_interim(self, text: str):
         if not text: return
-        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH, alternatives=[]))
+        if not self._speaking:
+            self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH, alternatives=[]))
+            self._speaking = True
         self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.INTERIM_TRANSCRIPT, alternatives=[stt.SpeechData(text=text, language="en")]))
 
     async def _run(self) -> None:
@@ -190,6 +195,7 @@ class RecallSpeechStream(stt.SpeechStream):
                             continue
 
                         msg = json.loads(raw)
+                        logger.debug(f"[RECALL] Relay message: {msg}")
                         event = msg.get("event")
 
                         if event == "transcript.data":
