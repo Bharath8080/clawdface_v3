@@ -96,26 +96,35 @@ export async function POST(request: Request) {
             metadata: { roomId },
             recording_config: {
               transcript: {
-                provider: {
-                  deepgram_streaming: { model: 'nova-3' },
+                recallai_streaming: {
+                  mode: 'prioritize_low_latency',
+                  language_code: 'en',
                 },
               },
             },
           };
 
+
+
           // Register the relay as a real-time endpoint on the bot.
-          // Auto-detect type: wss:// or ws:// → websocket, https:// or http:// → webhook
-          // Append ?room_id= so the relay can route events to the correct LiveKit room.
+          // Note: Recall.ai 'realtime' transcripts typically use the Webhook (POST) method.
+          // Even if the agent connects via WSS, the Bot must push via HTTP.
           if (recallEndpoint) {
-            const isWebSocket = recallEndpoint.startsWith('wss://') || recallEndpoint.startsWith('ws://');
-            const endpointType = isWebSocket ? 'websocket' : 'webhook';
-            const endpointUrl  = `${recallEndpoint}?room_id=${encodeURIComponent(roomId)}`;
+            // Map the relay URL to its HTTP webhook counterpart for ingestion.
+            // e.g. wss://recall.trugen.ai/ws -> https://recall.trugen.ai/api/v1/webhook
+            let endpointUrl = recallEndpoint
+              .replace('wss://', 'https://')
+              .replace('ws://', 'http://')
+              .replace(/\/ws$/, '/api/v1/webhook');
+            
+            // Append the room_id so the relay knows where to route the events.
+            endpointUrl = `${endpointUrl}${endpointUrl.includes('?') ? '&' : '?'}room_id=${encodeURIComponent(roomId)}`;
 
             recallBody.recording_config = {
               ...(recallBody.recording_config as object),
               realtime_endpoints: [
                 {
-                  type: endpointType,
+                  type: 'webhook',
                   url: endpointUrl,
                   events: [
                     'transcript.data',
@@ -126,8 +135,9 @@ export async function POST(request: Request) {
                 },
               ],
             };
-            console.log(`[start-agent] Recall.ai realtime endpoint (${endpointType}): ${endpointUrl}`);
+            console.log(`[start-agent] Recall.ai realtime webhook endpoint: ${endpointUrl}`);
           }
+
 
           const recallResp = await fetch(recallApiUrl, {
             method: 'POST',

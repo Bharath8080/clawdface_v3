@@ -172,10 +172,12 @@ class RecallSpeechStream(stt.SpeechStream):
                     open_timeout=15,
                 ) as ws:
                     await ws.send(json.dumps({"type": "set_lk_room_id", "data": room_name}))
-                    # Also register bot_id as a fallback routing key if relay supports it
+                    
+                    # Also register bot_id as a primary routing key for the relay
                     if self._recall_bot_id:
                         await ws.send(json.dumps({"type": "set_bot_id", "data": self._recall_bot_id}))
                         logger.info(f"[RECALL] Registered bot_id with relay: {self._recall_bot_id}")
+                    
                     logger.info(f"[RECALL] Connected to relay for room: {room_name}")
                     retry_delay = 2
                     while True:
@@ -236,17 +238,12 @@ class MeetingVAD(agents.vad.VAD):
 
 class MeetingVADStream(agents.vad.VADStream):
     async def _main_task(self):
-        # Always report speech to ensure STT is never gated in meeting mode.
-        # VADEvent requires timestamp, speech_duration, silence_duration — all mandatory.
+        # We don't emit artificial START events anymore, as RecallSpeechStream
+        # handles its own START/END/FINAL sequence for full transcripts.
+        # This prevents the VAD from "blocking" the LLM response by 
+        # appearing as though someone is perpetually speaking.
         while True:
-            self._event_ch.send_nowait(agents.vad.VADEvent(
-                type=agents.vad.VADEventType.START_OF_SPEECH,
-                samples_index=0,
-                timestamp=time.time(),
-                speech_duration=0.0,
-                silence_duration=0.0,
-            ))
-            await asyncio.sleep(10)
+            await asyncio.sleep(3600)
 
 def resolve_config(ctx: agents.JobContext) -> tuple[dict, str]:
     # 1. Job Metadata
