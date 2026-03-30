@@ -74,19 +74,8 @@ export async function POST(request: Request) {
       maxParticipants: 10,
     });
 
-    // 5. Build dispatch metadata — agent.py reads all of these fields
-    const metadata = JSON.stringify({
-      openclawUrl:  agent.openclaw_url  || '',
-      gatewayToken: agent.gateway_token || '',
-      sessionKey:   sessionKey          || '',
-      avatarId:     agent.avatar_id     || '',
-      meetingUrl:   meetingUrl          || '', // consumed by RecallAISTT in agent.py
-      agentName:    agent.name          || 'AI Assistant',
-    });
-
-    // 6. Dispatch the agent to the room
-    await dispatchClient.createDispatch(roomId, 'clawdface', { metadata });
-    console.log(`[start-agent] Agent 'clawdface' dispatched to room ${roomId}`);
+    // 6. Dispatch happens AFTER Recall bot creation so we can include recallBotId in metadata.
+    //    See step 6b below.
 
     // 7. If a meetingUrl is provided, create a Recall.ai bot to join the external meeting
     let recallBotId: string | null = null;
@@ -113,18 +102,28 @@ export async function POST(request: Request) {
             },
           };
 
-          // Enable real-time transcript streaming if a webhook is configured
+          // Enable real-time transcript streaming if a webhook is configured.
+          // CRITICAL: append ?room_id so the relay can route events to the correct
+          // LiveKit room WebSocket. Without this the relay has no routing key and
+          // all transcript events are silently dropped (agent sees only ping timeouts).
           if (recallWebhook) {
+            const webhookWithRoom = `${recallWebhook}?room_id=${encodeURIComponent(roomId)}`;
             recallBody.recording_config = {
               ...(recallBody.recording_config as object),
               realtime_endpoints: [
                 {
                   type: 'webhook',
-                  url: recallWebhook,
-                  events: ['transcript.data', 'transcript.partial_data'],
+                  url: webhookWithRoom,
+                  events: [
+                    'transcript.data',
+                    'transcript.partial_data',
+                    'participant_events.join',
+                    'participant_events.leave',
+                  ],
                 },
               ],
             };
+            console.log(`[start-agent] Recall.ai webhook configured: ${webhookWithRoom}`);
           }
 
           const recallResp = await fetch(recallApiUrl, {
@@ -151,6 +150,20 @@ export async function POST(request: Request) {
         }
       }
     }
+
+    // 6b. Dispatch the agent — NOW we include recallBotId so the relay can route by bot_id too
+    const metadata = JSON.stringify({
+      openclawUrl:    agent.openclaw_url  || '',
+      gatewayToken:   agent.gateway_token || '',
+      sessionKey:     sessionKey          || '',
+      avatarId:       agent.avatar_id     || '',
+      meetingUrl:     meetingUrl          || '',
+      agentName:      agent.name          || 'AI Assistant',
+      recallBotId:    recallBotId         || '',   // relay fallback routing key
+    });
+
+    await dispatchClient.createDispatch(roomId, 'clawdface', { metadata });
+    console.log(`[start-agent] Agent dispatched to room ${roomId} (recallBotId=${recallBotId ?? 'none'})`);
 
     // 8. Build the video URL (used by the email / caller to display the avatar)
     const baseAppUrl = process.env.NEXT_PUBLIC_APP_URL;
