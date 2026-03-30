@@ -15,13 +15,15 @@ from livekit.agents.voice import MetricsCollectedEvent
 from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import elevenlabs, openai, trugen, silero, deepgram
 
-# Import Recall.ai STT from local recall.py
-from recall import RecallAIDirectSTT
-
 # OTEL for Langfuse
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+import websockets
+from livekit.agents import stt
+from livekit.agents.utils import AudioBuffer
+from livekit.agents.types import NOT_GIVEN, NotGivenOr
 
 load_dotenv()
 logger = logging.getLogger("trugen-agent")
@@ -115,6 +117,85 @@ MALE_AVATAR_IDS = {
 }
 
 DEFAULT_AVATAR_ID = "1a640442"
+
+# ---------------------------------------------------------------------------
+# RECALL.AI STT IMPLEMENTATION (Integrated)
+# ---------------------------------------------------------------------------
+class RecallAIDirectSTT(stt.STT):
+    def __init__(self, ctx: agents.JobContext):
+        super().__init__(capabilities=stt.STTCapabilities(streaming=True, interim_results=True))
+        self._ctx = ctx
+
+    @property
+    def provider(self) -> str: return "recall-ai-direct"
+
+    async def _recognize_impl(self, buffer: AudioBuffer, *, language: NotGivenOr[str] = NOT_GIVEN, conn_options: APIConnectOptions = APIConnectOptions()) -> stt.SpeechEvent:
+        return stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH, alternatives=[])
+
+    def stream(self, *, language: NotGivenOr[str] = NOT_GIVEN, conn_options: APIConnectOptions = APIConnectOptions()) -> "RecallSpeechStream":
+        return RecallSpeechStream(stt=self, conn_options=conn_options, ctx=self._ctx)
+
+class RecallSpeechStream(stt.SpeechStream):
+    def __init__(self, *, stt: RecallAIDirectSTT, conn_options: APIConnectOptions, ctx: agents.JobContext) -> None:
+        super().__init__(stt=stt, conn_options=conn_options)
+        self._ctx = ctx
+
+    def _emit_final(self, text: str):
+        if not text: return
+        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH, alternatives=[]))
+        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.FINAL_TRANSCRIPT, alternatives=[stt.SpeechData(text=text, language="en")]))
+        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.END_OF_SPEECH, alternatives=[stt.SpeechData(text=text, language="en")]))
+
+    def _emit_interim(self, text: str):
+        if not text: return
+        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH, alternatives=[]))
+        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.INTERIM_TRANSCRIPT, alternatives=[stt.SpeechData(text=text, language="en")]))
+
+    async def _run(self) -> None:
+        relay_url = os.getenv("EXTERNAL_MEETINGS_WS_URL", "wss://recall.trugen.ai/ws").strip()
+        room_name = self._ctx.room.name
+        retry_delay = 2
+
+        while True:
+            try:
+                async with websockets.connect(relay_url, ping_interval=20, ping_timeout=20) as ws:
+                    await ws.send(json.dumps({"type": "set_lk_room_id", "data": room_name}))
+                    print(f"[RECALL] Connected to relay for room: {room_name}")
+                    retry_delay = 2
+                    while True:
+                        raw = await ws.recv()
+                        msg = json.loads(raw)
+                        if msg.get("event") == "transcript.data":
+                            words = msg.get("data", {}).get("data", {}).get("words", [])
+                            text = " ".join(w.get("text", "") for w in words if isinstance(w, dict) and w.get("text")).strip()
+                            if text:
+                                participant = msg.get("data", {}).get("data", {}).get("participant", {})
+                                speaker = participant.get("name") if isinstance(participant, dict) else "Unknown"
+                                print(f"[RECALL] {speaker}: {text}")
+                                self._emit_final(f"{speaker}: {text}")
+                        elif msg.get("event") == "transcript.partial_data":
+                            words = msg.get("data", {}).get("data", {}).get("words", [])
+                            text = " ".join(w.get("text", "") for w in words if isinstance(w, dict) and w.get("text")).strip()
+                            if text: self._emit_interim(text)
+            except Exception as e:
+                print(f"[RECALL] Connection error: {e}. Retrying in {retry_delay}s...")
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 30)
+
+# ---------------------------------------------------------------------------
+# MEETING VAD (Always triggers on speech events)
+# ---------------------------------------------------------------------------
+class MeetingVAD(agents.vad.VAD):
+    def __init__(self):
+        super().__init__(capabilities=agents.vad.VADCapabilities(update_interval=0.1))
+    def stream(self): return MeetingVADStream(self)
+
+class MeetingVADStream(agents.vad.VADStream):
+    async def _run(self):
+        # Always report speech to ensure STT is never gated in meeting mode
+        while True:
+            self._event_ch.send_nowait(agents.vad.VADEvent(type=agents.vad.VADEventType.START_OF_SPEECH, samples_index=0))
+            await asyncio.sleep(10)
 
 def resolve_config(ctx: agents.JobContext) -> tuple[dict, str]:
     # 1. Job Metadata
@@ -251,18 +332,20 @@ async def my_agent(ctx: agents.JobContext):
     # For others (website/url), we use high-performance Deepgram Flux.
     # ---------------------------------------------------------------------------
     if connection_type in ("email_dispatch", "recall"):
-        print(f"[STT] Meeting mode \u2192 Using RecallAIDirectSTT")
+        print(f"[STT] Meeting mode \u2192 Using RecallAIDirectSTT + MeetingVAD")
         stt_provider = RecallAIDirectSTT(ctx=ctx)
+        vad_provider = MeetingVAD()
     else:
         print(f"[STT] Standard mode \u2192 Using Deepgram STTv2 (Flux)")
         stt_provider = deepgram.STTv2(
             model="flux-general-en",
             eager_eot_threshold=0.4,
         )
+        vad_provider = silero.VAD.load()
 
     session = AgentSession(
         stt=stt_provider,
-        vad=silero.VAD.load(),
+        vad=vad_provider,
         llm=llm,
         tts=elevenlabs.TTS(voice_id=voice_id, model="eleven_flash_v2_5"),
         conn_options=SessionConnectOptions(
