@@ -15,15 +15,13 @@ from livekit.agents.voice import MetricsCollectedEvent
 from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import elevenlabs, openai, trugen, silero, deepgram
 
+import websockets
+from typing import AsyncGenerator, Dict
+
 # OTEL for Langfuse
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
-import websockets
-from livekit.agents import stt
-from livekit.agents.utils import AudioBuffer
-from livekit.agents.types import NOT_GIVEN, NotGivenOr
 
 load_dotenv()
 logger = logging.getLogger("trugen-agent")
@@ -87,13 +85,17 @@ def chat_proxy():
 
 def run_proxy():
     try:
+        # Check if port is already active via a quick socket check
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(('localhost', 4041)) == 0:
+                print("[PROXY] Port 4041 already active, skipping startup.")
+                return
+
         print("--- OpenClaw Proxy Active (port 4041) ---")
         app.run(host='0.0.0.0', port=4041, debug=False, use_reloader=False)
-    except OSError as e:
-        if "already in use" in str(e).lower():
-            print("[PROXY] Port 4041 already bound - reusing instance.")
-        else:
-            raise
+    except Exception as e:
+        print(f"[PROXY] Startup skipped or error: {e}")
 
 threading.Thread(target=run_proxy, daemon=True).start()
 
@@ -117,85 +119,6 @@ MALE_AVATAR_IDS = {
 }
 
 DEFAULT_AVATAR_ID = "1a640442"
-
-# ---------------------------------------------------------------------------
-# RECALL.AI STT IMPLEMENTATION (Integrated)
-# ---------------------------------------------------------------------------
-class RecallAIDirectSTT(stt.STT):
-    def __init__(self, ctx: agents.JobContext):
-        super().__init__(capabilities=stt.STTCapabilities(streaming=True, interim_results=True))
-        self._ctx = ctx
-
-    @property
-    def provider(self) -> str: return "recall-ai-direct"
-
-    async def _recognize_impl(self, buffer: AudioBuffer, *, language: NotGivenOr[str] = NOT_GIVEN, conn_options: APIConnectOptions = APIConnectOptions()) -> stt.SpeechEvent:
-        return stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH, alternatives=[])
-
-    def stream(self, *, language: NotGivenOr[str] = NOT_GIVEN, conn_options: APIConnectOptions = APIConnectOptions()) -> "RecallSpeechStream":
-        return RecallSpeechStream(stt=self, conn_options=conn_options, ctx=self._ctx)
-
-class RecallSpeechStream(stt.SpeechStream):
-    def __init__(self, *, stt: RecallAIDirectSTT, conn_options: APIConnectOptions, ctx: agents.JobContext) -> None:
-        super().__init__(stt=stt, conn_options=conn_options)
-        self._ctx = ctx
-
-    def _emit_final(self, text: str):
-        if not text: return
-        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH, alternatives=[]))
-        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.FINAL_TRANSCRIPT, alternatives=[stt.SpeechData(text=text, language="en")]))
-        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.END_OF_SPEECH, alternatives=[stt.SpeechData(text=text, language="en")]))
-
-    def _emit_interim(self, text: str):
-        if not text: return
-        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH, alternatives=[]))
-        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.INTERIM_TRANSCRIPT, alternatives=[stt.SpeechData(text=text, language="en")]))
-
-    async def _run(self) -> None:
-        relay_url = os.getenv("EXTERNAL_MEETINGS_WS_URL", "wss://recall.trugen.ai/ws").strip()
-        room_name = self._ctx.room.name
-        retry_delay = 2
-
-        while True:
-            try:
-                async with websockets.connect(relay_url, ping_interval=20, ping_timeout=20) as ws:
-                    await ws.send(json.dumps({"type": "set_lk_room_id", "data": room_name}))
-                    print(f"[RECALL] Connected to relay for room: {room_name}")
-                    retry_delay = 2
-                    while True:
-                        raw = await ws.recv()
-                        msg = json.loads(raw)
-                        if msg.get("event") == "transcript.data":
-                            words = msg.get("data", {}).get("data", {}).get("words", [])
-                            text = " ".join(w.get("text", "") for w in words if isinstance(w, dict) and w.get("text")).strip()
-                            if text:
-                                participant = msg.get("data", {}).get("data", {}).get("participant", {})
-                                speaker = participant.get("name") if isinstance(participant, dict) else "Unknown"
-                                print(f"[RECALL] {speaker}: {text}")
-                                self._emit_final(f"{speaker}: {text}")
-                        elif msg.get("event") == "transcript.partial_data":
-                            words = msg.get("data", {}).get("data", {}).get("words", [])
-                            text = " ".join(w.get("text", "") for w in words if isinstance(w, dict) and w.get("text")).strip()
-                            if text: self._emit_interim(text)
-            except Exception as e:
-                print(f"[RECALL] Connection error: {e}. Retrying in {retry_delay}s...")
-                await asyncio.sleep(retry_delay)
-                retry_delay = min(retry_delay * 2, 30)
-
-# ---------------------------------------------------------------------------
-# MEETING VAD (Always triggers on speech events)
-# ---------------------------------------------------------------------------
-class MeetingVAD(agents.vad.VAD):
-    def __init__(self):
-        super().__init__(capabilities=agents.vad.VADCapabilities(update_interval=0.1))
-    def stream(self): return MeetingVADStream(self)
-
-class MeetingVADStream(agents.vad.VADStream):
-    async def _run(self):
-        # Always report speech to ensure STT is never gated in meeting mode
-        while True:
-            self._event_ch.send_nowait(agents.vad.VADEvent(type=agents.vad.VADEventType.START_OF_SPEECH, samples_index=0))
-            await asyncio.sleep(10)
 
 def resolve_config(ctx: agents.JobContext) -> tuple[dict, str]:
     # 1. Job Metadata
@@ -259,20 +182,115 @@ def setup_langfuse(metadata: dict):
     return tp
 
 # ---------------------------------------------------------------------------
-# AGENT DEFINITION
+# MEETING RELAY TASK (Direct Transcript Injection)
+# ---------------------------------------------------------------------------
+async def start_recall_relay(session: agents.voice.AgentSession, room_name: str):
+    """
+    Listens to the Recall.ai relay and injects transcripts directly into the session.
+    Bypasses VAD/STT pipeline for multi-speaker meeting support.
+    """
+    client = RecallRelayClient(room_id=room_name)
+    
+    async for event in client.listen():
+        if event["type"] == "final":
+            text = event["text"]
+            speaker = event["speaker"]
+            print(f"[RECALL] {speaker}: {text}")
+            
+            # Simple noise filter to avoid constant interruptions
+            if len(text.split()) < 2: 
+                continue
+
+            try:
+                # Inject as a user turn
+                # This will automatically trigger the LLM to generate a response
+                session.run(user_input=f"{speaker}: {text}")
+            except RuntimeError:
+                # Nested runs not supported (agent is busy speaking or thinking)
+                # In a meeting, we could queue these or just ignore them if the agent is already in a turn.
+                print(f"[RECALL] Agent busy, skipping input: {text[:30]}...")
+                pass
+        
+        elif event["type"] == "interim":
+            # Optional: Display interim text in logs for debug
+            pass
+
+# ---------------------------------------------------------------------------
+# RECALL.AI RELAY CLIENT (Merged from recall.py)
+# ---------------------------------------------------------------------------
+class RecallRelayClient:
+    """
+    A simple client for the Recall.ai WebSocket relay.
+    """
+    def __init__(self, room_id: str):
+        self.room_id = room_id
+        self.url = os.getenv("EXTERNAL_MEETINGS_WS_URL", "wss://recall.trugen.ai/ws").strip()
+        self._ws = None
+
+    def _extract_participant_name(self, msg: dict) -> str:
+        participant = msg.get("data", {}).get("data", {}).get("participant", {})
+        if isinstance(participant, dict):
+            return participant.get("name") or "Participant"
+        return "Participant"
+
+    def _extract_transcript(self, msg: dict) -> str:
+        words = msg.get("data", {}).get("data", {}).get("words", [])
+        if not isinstance(words, list):
+            return ""
+        return " ".join(w.get("text", "") for w in words if isinstance(w, dict) and w.get("text")).strip()
+
+    async def listen(self) -> AsyncGenerator[Dict, None]:
+        if not self.url:
+            print("[RECALL] Relay URL not configured")
+            return
+
+        while True:
+            try:
+                print(f"[RECALL] Connecting to relay: {self.url}")
+                async with websockets.connect(self.url) as ws:
+                    self._ws = ws
+                    # Identify which room we are interested in
+                    await ws.send(json.dumps({"type": "set_lk_room_id", "data": self.room_id}))
+                    print(f"[RECALL] Bound to room: {self.room_id}")
+
+                    while True:
+                        raw = await ws.recv()
+                        msg = json.loads(raw)
+                        event = msg.get("event")
+
+                        if event == "transcript.data":
+                            text = self._extract_transcript(msg)
+                            if text:
+                                speaker = self._extract_participant_name(msg)
+                                yield {"type": "final", "text": text, "speaker": speaker}
+
+                        elif event == "transcript.partial_data":
+                            text = self._extract_transcript(msg)
+                            if text:
+                                yield {"type": "interim", "text": text}
+
+            except (websockets.ConnectionClosed, Exception) as e:
+                print(f"[RECALL] Relay connection shared/error: {e}. Retrying in 5s...")
+                await asyncio.sleep(5)
+
+# ---------------------------------------------------------------------------
+# TELEMETRY & TRACING (Langfuse)
 # ---------------------------------------------------------------------------
 class MyAgent(Agent):
     def __init__(self) -> None:
         super().__init__(instructions=(
             "You are a helpful AI assistant. Keep responses to 2-4 short spoken sentences. "
-            "Be conversational. Never use markdown, bullet points, or formatting."
+            "Be conversational. Never use markdown, bullet points, or formatting. "
+            "If a transcript is prefixed with a name (e.g. 'John: ...'), that is a meeting participant. "
+            "Address them by name if appropriate."
         ))
 
 server = AgentServer()
 
 @server.rtc_session(agent_name="clawdface")
 async def my_agent(ctx: agents.JobContext):
-    await ctx.connect()
+    # For meetings, avoid closing the session when the trigger participant leaves
+    await ctx.connect(room_input_options=agents.voice.RoomInputOptions(close_on_disconnect=False))
 
     # Resolve config with retry
     config, connection_type = {}, "unknown"
@@ -292,7 +310,7 @@ async def my_agent(ctx: agents.JobContext):
     avatar_id = config.get("avatarId") or os.getenv("TRUGEN_AVATAR_ID") or DEFAULT_AVATAR_ID
     voice_id = "CwhRBWXzGAHq8TQ4Fs17" if avatar_id in MALE_AVATAR_IDS else "FGY2WhTYpPnrIDTdsKH5"
 
-    print(f"[SESSION] Start: {connection_type} | Avatar: {avatar_id} | Voice: {voice_id}")
+    print(f"[SESSION] Start: {connection_type} | Avatar: {avatar_id} | Room: {ctx.room.name}")
 
     # Telemetry
     tp = setup_langfuse({
@@ -307,11 +325,11 @@ async def my_agent(ctx: agents.JobContext):
     if tp:
         async def _flush():
             tp.force_flush()
+            return None # Explicit None to avoid bool await issue
         ctx.add_shutdown_callback(_flush)
 
     # LLM via local proxy
     import openai as _openai
-    import httpx
     mega_token = f"{url}|{token}|{key}"
     llm = openai.LLM(
         model="openclaw",
@@ -326,28 +344,27 @@ async def my_agent(ctx: agents.JobContext):
     )
 
     # ---------------------------------------------------------------------------
-    # DUAL STT STRATEGY
-    # ---------------------------------------------------------------------------
-    # For meetings (email_dispatch/recall), we use Recall.ai's Direct STT relay.
-    # For others (website/url), we use high-performance Deepgram Flux.
+    # DUAL PIPELINE STRATEGY
     # ---------------------------------------------------------------------------
     if connection_type in ("email_dispatch", "recall"):
-        print(f"[STT] Meeting mode \u2192 Using RecallAIDirectSTT + MeetingVAD")
-        stt_provider = RecallAIDirectSTT(ctx=ctx)
-        vad_provider = MeetingVAD()
+        print(f"[PIPELINE] Meeting mode \u2192 Using Direct Injection + Silero VAD")
+        # In meeting mode, we use Silero as a "backup" or just to satisfy the session.
+        # The primary STT input will come from the start_recall_relay task.
+        stt_provider = deepgram.STTv2(model="flux-general-en") # Fallback to DG for local participants
     else:
-        print(f"[STT] Standard mode \u2192 Using Deepgram STTv2 (Flux)")
+        print(f"[PIPELINE] Standard mode \u2192 Using Deepgram STTv2 (Flux)")
         stt_provider = deepgram.STTv2(
             model="flux-general-en",
             eager_eot_threshold=0.4,
         )
-        vad_provider = silero.VAD.load()
 
     session = AgentSession(
         stt=stt_provider,
-        vad=vad_provider,
+        vad=silero.VAD.load(),
         llm=llm,
         tts=elevenlabs.TTS(voice_id=voice_id, model="eleven_flash_v2_5"),
+        allow_interruptions=True,
+        min_endpointing_delay=1.0 if connection_type == "email_dispatch" else 0.5,
         conn_options=SessionConnectOptions(
             llm_conn_options=APIConnectOptions(timeout=300.0, max_retry=0)
         )
@@ -356,7 +373,7 @@ async def my_agent(ctx: agents.JobContext):
     @session.on("user_input_transcribed")
     def on_user_speech(ev: agents.UserInputTranscribedEvent):
         if ev.transcript:
-            print(f"[STT] {ev.transcript}")
+            print(f"[STT] Local: {ev.transcript}")
 
     @session.on("conversation_item_added")
     def on_item_added(ev: agents.ConversationItemAddedEvent):
@@ -370,16 +387,16 @@ async def my_agent(ctx: agents.JobContext):
         await trugen_avatar.start(session, room=ctx.room)
         await session.start(room=ctx.room, agent=MyAgent())
         
-        # Initial Greeting
-        session.say("Hello! Let's get started.")
-        
+        # Start Relay in background if in meeting
+        if connection_type in ("email_dispatch", "recall"):
+            ctx.create_task(start_recall_relay(session, ctx.room.name))
+            session.say("Hello everyone! I'm here to assist.")
+        else:
+            session.say("Hello! Let's get started.")
+            
     except Exception as e:
         print(f"[SESSION] \u2717 Fatal error: {e}")
         raise
 
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "download-files":
-        silero.VAD.load()
-        sys.exit(0)
     cli.run_app(server)
