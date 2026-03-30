@@ -81,12 +81,13 @@ export async function POST(request: Request) {
     let recallBotId: string | null = null;
 
     if (meetingUrl) {
-      const recallApiUrl  = process.env.EXTERNAL_MEETINGS_API_URL;
+      // Fallback to known Recall.ai endpoint if env var not set
+      const recallApiUrl  = process.env.EXTERNAL_MEETINGS_API_URL || 'https://us-west-2.recall.ai/api/v1/bot/';
       const recallToken   = process.env.EXTERNAL_MEETINGS_API_TOKEN;
-      const recallWebhook = process.env.EXTERNAL_MEETINGS_WEBHOOK_URL;
+      const recallEndpoint = process.env.EXTERNAL_MEETINGS_WEBHOOK_URL; // may be wss:// or https://
 
-      if (!recallToken || !recallApiUrl) {
-        console.warn('[start-agent] EXTERNAL_MEETINGS_API_TOKEN or EXTERNAL_MEETINGS_API_URL not set — skipping Recall.ai bot');
+      if (!recallToken) {
+        console.warn('[start-agent] EXTERNAL_MEETINGS_API_TOKEN not set — skipping Recall.ai bot');
       } else {
         try {
           const recallBody: Record<string, unknown> = {
@@ -102,18 +103,20 @@ export async function POST(request: Request) {
             },
           };
 
-          // Enable real-time transcript streaming if a webhook is configured.
-          // CRITICAL: append ?room_id so the relay can route events to the correct
-          // LiveKit room WebSocket. Without this the relay has no routing key and
-          // all transcript events are silently dropped (agent sees only ping timeouts).
-          if (recallWebhook) {
-            const webhookWithRoom = `${recallWebhook}?room_id=${encodeURIComponent(roomId)}`;
+          // Register the relay as a real-time endpoint on the bot.
+          // Auto-detect type: wss:// or ws:// → websocket, https:// or http:// → webhook
+          // Append ?room_id= so the relay can route events to the correct LiveKit room.
+          if (recallEndpoint) {
+            const isWebSocket = recallEndpoint.startsWith('wss://') || recallEndpoint.startsWith('ws://');
+            const endpointType = isWebSocket ? 'websocket' : 'webhook';
+            const endpointUrl  = `${recallEndpoint}?room_id=${encodeURIComponent(roomId)}`;
+
             recallBody.recording_config = {
               ...(recallBody.recording_config as object),
               realtime_endpoints: [
                 {
-                  type: 'webhook',
-                  url: webhookWithRoom,
+                  type: endpointType,
+                  url: endpointUrl,
                   events: [
                     'transcript.data',
                     'transcript.partial_data',
@@ -123,7 +126,7 @@ export async function POST(request: Request) {
                 },
               ],
             };
-            console.log(`[start-agent] Recall.ai webhook configured: ${webhookWithRoom}`);
+            console.log(`[start-agent] Recall.ai realtime endpoint (${endpointType}): ${endpointUrl}`);
           }
 
           const recallResp = await fetch(recallApiUrl, {
