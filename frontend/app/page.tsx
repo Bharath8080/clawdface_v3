@@ -72,7 +72,7 @@ const AVATARS = [
   { id: "05b401f3", name: "Misha",    image: "/avatars/misha.jpg" },
   { id: "13550375", name: "Alex",     image: "/avatars/alex.png" },
   { id: "48d778c9", name: "Amir",     image: "/avatars/amir.jpg" },
-  { id: "18c4043e", name: "Akbar",    image: "/avatars/akbar.jpg" },
+  { id: "48d778c9", name: "Akbar",    image: "/avatars/akbar.jpg" },
 ];
 
 // ─── Icons ──────────────────────────────────────────────────────────────────
@@ -208,7 +208,7 @@ const RecallUrlModal = ({
   }, [isOpen]);
 
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
-  const recallUrl = `${baseUrl}/avatar?room=${roomName}&avatarId=${config.avatarId}&openclawUrl=${encodeURIComponent(config.openclawUrl)}&gatewayToken=${encodeURIComponent(config.gatewayToken)}&sessionKey=${encodeURIComponent(recallSessionKey)}`;
+  const recallUrl = `${baseUrl}/avatar?room=${roomName}&avatarId=${config.avatarId}&openclawUrl=${encodeURIComponent(config.openclawUrl)}&gatewayToken=${encodeURIComponent(config.gatewayToken)}&sessionKey=${encodeURIComponent(recallSessionKey)}&connection_type=recall`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(recallUrl);

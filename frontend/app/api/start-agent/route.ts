@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
-// This API handles generating meeting URLs for an agent and explicitly dispatching the agent to the LiveKit room.
 import { db, agents, bots, profiles } from '@/drizzle';
 import { eq } from 'drizzle-orm';
 import { RoomServiceClient, AgentDispatchClient } from 'livekit-server-sdk';
 
-// Helper for timestamp-based IDs
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 function generateTimestampId(prefix: string): string {
   const now = new Date();
   const format = now.toISOString()
@@ -12,6 +14,15 @@ function generateTimestampId(prefix: string): string {
     .replace(/:/g, '-');
   return `${prefix}-${format}`;
 }
+
+// ---------------------------------------------------------------------------
+// POST /api/start-agent
+//
+// Called when an email-triggered meeting begins.
+// 1. Fetches agent config from DB
+// 2. Creates a LiveKit room and dispatches the agent
+// 3. If a meetingUrl is provided, creates a Recall.ai bot to join that meeting
+// ---------------------------------------------------------------------------
 
 export async function POST(request: Request) {
   try {
@@ -22,7 +33,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing email' }, { status: 400 });
     }
 
-    // 1. Fetch agent config AND owner email from DB using email
+    // 1. Fetch agent config from DB
     const [result] = await db
       .select({
         agent: agents,
@@ -40,11 +51,11 @@ export async function POST(request: Request) {
 
     const { agent, userEmail } = result;
 
-    // 2. Auto-generate roomId and sessionKey
-    const roomId = generateTimestampId('room');
+    // 2. Generate room + session identifiers
+    const roomId     = generateTimestampId('room');
     const sessionKey = generateTimestampId('session');
 
-    // 3. Explicitly create room and dispatch agent
+    // 3. LiveKit credentials
     const API_KEY     = process.env.LIVEKIT_API_KEY;
     const API_SECRET  = process.env.LIVEKIT_API_SECRET;
     const LIVEKIT_URL = process.env.LIVEKIT_URL;
@@ -53,59 +64,121 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'LiveKit configuration is missing' }, { status: 500 });
     }
 
-    const roomService = new RoomServiceClient(LIVEKIT_URL, API_KEY, API_SECRET);
+    const roomService    = new RoomServiceClient(LIVEKIT_URL, API_KEY, API_SECRET);
     const dispatchClient = new AgentDispatchClient(LIVEKIT_URL, API_KEY, API_SECRET);
 
-    try {
-      await roomService.createRoom({
-        name: roomId,
-        emptyTimeout: 10 * 60, // 10 minutes
-        maxParticipants: 10,
-      });
+    // 4. Create LiveKit room
+    await roomService.createRoom({
+      name: roomId,
+      emptyTimeout: 10 * 60, // auto-close after 10 minutes of silence
+      maxParticipants: 10,
+    });
 
-      const metadata = JSON.stringify({
-        openclawUrl: agent.openclaw_url || "",
-        gatewayToken: agent.gateway_token || "",
-        sessionKey: sessionKey || "",
-        avatarId: agent.avatar_id || "",
-      });
+    // 5. Build dispatch metadata — agent.py reads all of these fields
+    const metadata = JSON.stringify({
+      openclawUrl:  agent.openclaw_url  || '',
+      gatewayToken: agent.gateway_token || '',
+      sessionKey:   sessionKey          || '',
+      avatarId:     agent.avatar_id     || '',
+      meetingUrl:   meetingUrl          || '', // consumed by RecallAISTT in agent.py
+      agentName:    agent.name          || 'AI Assistant',
+    });
 
-      await dispatchClient.createDispatch(roomId, "clawdface", { metadata });
-      console.log(`[start-agent] Explicitly dispatched 'clawdface' to room ${roomId}`);
-    } catch (err: any) {
-      console.error("[start-agent] Failed to create room or dispatch agent:", err);
-      // It's critical the agent is dispatched, fail the request if it doesn't work.
-      return NextResponse.json({ error: 'Failed to deploy agent to room: ' + err.message }, { status: 500 });
+    // 6. Dispatch the agent to the room
+    await dispatchClient.createDispatch(roomId, 'clawdface', { metadata });
+    console.log(`[start-agent] Agent 'clawdface' dispatched to room ${roomId}`);
+
+    // 7. If a meetingUrl is provided, create a Recall.ai bot to join the external meeting
+    let recallBotId: string | null = null;
+
+    if (meetingUrl) {
+      const recallApiUrl  = process.env.EXTERNAL_MEETINGS_API_URL;
+      const recallToken   = process.env.EXTERNAL_MEETINGS_API_TOKEN;
+      const recallWebhook = process.env.EXTERNAL_MEETINGS_WEBHOOK_URL;
+
+      if (!recallToken || !recallApiUrl) {
+        console.warn('[start-agent] EXTERNAL_MEETINGS_API_TOKEN or EXTERNAL_MEETINGS_API_URL not set — skipping Recall.ai bot');
+      } else {
+        try {
+          const recallBody: Record<string, unknown> = {
+            meeting_url: meetingUrl,
+            bot_name: agent.name || 'AI Assistant',
+            metadata: { roomId },
+            recording_config: {
+              transcript: {
+                provider: {
+                  deepgram_streaming: { model: 'nova-3' },
+                },
+              },
+            },
+          };
+
+          // Enable real-time transcript streaming if a webhook is configured
+          if (recallWebhook) {
+            recallBody.recording_config = {
+              ...(recallBody.recording_config as object),
+              realtime_endpoints: [
+                {
+                  type: 'webhook',
+                  url: recallWebhook,
+                  events: ['transcript.data', 'transcript.partial_data'],
+                },
+              ],
+            };
+          }
+
+          const recallResp = await fetch(recallApiUrl, {
+            method: 'POST',
+            headers: {
+              Authorization:  `Token ${recallToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(recallBody),
+          });
+
+          if (recallResp.ok) {
+            const recallBot = await recallResp.json() as { id: string };
+            recallBotId = recallBot.id;
+            console.log(`[start-agent] Recall.ai bot created: ${recallBotId}`);
+          } else {
+            const errText = await recallResp.text();
+            console.error(
+              `[start-agent] Recall.ai bot creation failed (${recallResp.status}): ${errText}`
+            );
+          }
+        } catch (recallErr: unknown) {
+          console.error('[start-agent] Recall.ai request error:', recallErr);
+        }
+      }
     }
 
-    // 4. URL-encode the openclawUrl
-    const encodedUrl = encodeURIComponent(agent.openclaw_url);
-
-    // 5. Construct the full video URL
+    // 8. Build the video URL (used by the email / caller to display the avatar)
     const baseAppUrl = process.env.NEXT_PUBLIC_APP_URL;
-
     if (!baseAppUrl) {
-      return NextResponse.json({ error: 'NEXT_PUBLIC_APP_URL configuration is missing' }, { status: 500 });
+      return NextResponse.json({ error: 'NEXT_PUBLIC_APP_URL not configured' }, { status: 500 });
     }
-    
-    const videoUrl = `${baseAppUrl}/avatar` +
+
+    const videoUrl =
+      `${baseAppUrl}/avatar` +
       `?room=${roomId}` +
       `&avatarId=${agent.avatar_id}` +
-      `&openclawUrl=${encodedUrl}` +
+      `&openclawUrl=${encodeURIComponent(agent.openclaw_url)}` +
       `&gatewayToken=${agent.gateway_token}` +
       `&sessionKey=${sessionKey}`;
 
-    // 5. Return metadata to the caller (external system handles Recall.ai)
-    return NextResponse.json({ 
-      videoUrl, 
-      userEmail: userEmail || null,
-      agentName: agent.name,
-      avatarId: agent.avatar_id,
+    return NextResponse.json({
+      videoUrl,
+      userEmail:   userEmail  || null,
+      agentName:   agent.name,
+      avatarId:    agent.avatar_id,
       roomId,
-      sessionKey
+      sessionKey,
+      recallBotId,   // null when no meetingUrl provided
     });
-  } catch (error: any) {
-    console.error('Error starting agent:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[start-agent] Unhandled error:', error);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

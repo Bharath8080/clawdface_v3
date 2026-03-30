@@ -15,8 +15,18 @@ export type ConnectionDetails = {
   participantToken: string;
 };
 
-export async function GET() {
-  return handleConnection({});
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const config = {
+    openclawUrl:  searchParams.get("openclawUrl") || undefined,
+    gatewayToken: searchParams.get("gatewayToken") || undefined,
+    sessionKey:   searchParams.get("sessionKey") || undefined,
+    avatarId:     searchParams.get("avatarId") || undefined,
+    roomName:     searchParams.get("room") || undefined,
+    meetingUrl:   searchParams.get("meetingUrl") || undefined,
+    connection_type: searchParams.get("connection_type") || undefined,
+  };
+  return handleConnection(config);
 }
 
 export async function POST(req: Request) {
@@ -24,12 +34,15 @@ export async function POST(req: Request) {
   return handleConnection(body);
 }
 
+
 async function handleConnection(config: {
   openclawUrl?: string;
   gatewayToken?: string;
   sessionKey?: string;
   avatarId?: string;
   roomName?: string;
+  meetingUrl?: string;
+  connection_type?: string;
 }) {
   try {
     if (!LIVEKIT_URL) throw new Error("LIVEKIT_URL is not defined");
@@ -45,6 +58,8 @@ async function handleConnection(config: {
       gatewayToken: config.gatewayToken || "",
       sessionKey:   config.sessionKey   || "",
       avatarId:     config.avatarId     || "",
+      meetingUrl:   config.meetingUrl   || "",
+      connection_type: config.connection_type || "website",
     });
 
     console.log(`[connection-details] Room: ${roomName}`);

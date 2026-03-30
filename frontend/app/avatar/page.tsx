@@ -6,6 +6,7 @@ import {
   VideoTrack,
   useTracks,
   useParticipants,
+  useRoomContext,
 } from "@livekit/components-react";
 import { Track } from "livekit-client";
 import { useEffect, useState, Suspense } from "react";
@@ -25,6 +26,18 @@ function AvatarContent() {
   const agentVideoTrack = 
     subscribedTracks.find((t) => !t.participant.isLocal) ||
     screenShareTracks.find((t) => !t.participant.isLocal);
+
+  const room = useRoomContext();
+  
+  // Explicitly enable microphone on mount
+  useEffect(() => {
+    if (room) {
+      console.log("[Avatar] Enabling microphone...");
+      room.localParticipant.setMicrophoneEnabled(true).catch((err: Error) => {
+        console.error("[Avatar] Mic permission error:", err);
+      });
+    }
+  }, [room]);
 
   // Debug info in console
   useEffect(() => {
@@ -84,6 +97,8 @@ function AvatarPageInner() {
   const openclawUrl = searchParams.get("openclawUrl");
   const gatewayToken = searchParams.get("gatewayToken");
   const sessionKey = searchParams.get("sessionKey");
+  const meetingUrl = searchParams.get("meetingUrl");
+  const connectionType = searchParams.get("connection_type");
 
   const [connectionDetails, setConnectionDetails] = useState<ConnectionDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -105,6 +120,8 @@ function AvatarPageInner() {
             openclawUrl: openclawUrl || "",
             gatewayToken: gatewayToken || "",
             sessionKey: sessionKey || "",
+            meetingUrl: meetingUrl || "",
+            connection_type: connectionType || "",
           }),
         });
         
@@ -123,7 +140,8 @@ function AvatarPageInner() {
     }
 
     fetchToken();
-  }, [room, avatarId, openclawUrl, gatewayToken, sessionKey]);
+  }, [room, avatarId, openclawUrl, gatewayToken, sessionKey, connectionType, meetingUrl]);
+
 
   if (error) {
     return (
@@ -153,7 +171,7 @@ function AvatarPageInner() {
       token={connectionDetails.participantToken}
       serverUrl={connectionDetails.serverUrl}
       connect={true}
-      audio={false}
+      audio={true}
       video={false}
       className="h-screen w-screen"
     >
