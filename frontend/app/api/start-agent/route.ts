@@ -60,11 +60,7 @@ export async function POST(request: Request) {
       const recallApiUrl = process.env.EXTERNAL_MEETINGS_API_URL || 'https://us-west-2.recall.ai/api/v1/bot/';
       const recallToken  = process.env.EXTERNAL_MEETINGS_API_TOKEN;
  
-      // Relay: Recall.ai POSTs here, relay forwards to agent WS by room_id
-      // env EXTERNAL_MEETINGS_WEBHOOK_URL = https://recall.trugen.ai/webhook
-      const relayBase = (process.env.EXTERNAL_MEETINGS_WEBHOOK_URL || 'https://recall.trugen.ai/webhook')
-        .replace(/^wss?:\/\//, 'https://')
-        .replace(/\/ws$/, '/webhook');
+      const relayBase = process.env.EXTERNAL_MEETINGS_WEBHOOK_URL || 'wss://recall.trugen.ai/ws';
  
       const webhookUrl = `${relayBase}?room_id=${encodeURIComponent(roomId)}`;
       console.log(`[start-agent] Recall webhook: ${webhookUrl}`);
@@ -87,7 +83,7 @@ export async function POST(request: Request) {
               // Previous versions used "realtime_endpoints" (no underscore) — WRONG
               real_time_endpoints: [
                 {
-                  type: 'webhook',
+                  type: 'websocket',
                   url: webhookUrl,
                   // Only use officially documented event names.
                   // "transcript.partial_data" is NOT in the official list — omit it.
