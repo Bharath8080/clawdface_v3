@@ -60,60 +60,50 @@ export async function POST(request: Request) {
       const recallApiUrl = process.env.EXTERNAL_MEETINGS_API_URL || 'https://us-west-2.recall.ai/api/v1/bot/';
       const recallToken  = process.env.EXTERNAL_MEETINGS_API_TOKEN;
  
-      // ---------------------------------------------------------------------------
-      // WEBHOOK URL CONSTRUCTION
-      //
-      // The relay at recall.trugen.ai works like this:
-      //   - Agent connects to:  wss://recall.trugen.ai/ws?room_id=<roomId>
-      //   - Recall.ai POSTs to: https://recall.trugen.ai/webhook?room_id=<roomId>
-      //   - Relay matches both by room_id and forwards events to the agent's WS
-      //
-      // So we must use type:"webhook" with an https:// URL here.
-      // The room_id MUST match exactly what the agent registers with.
-      // ---------------------------------------------------------------------------
+      // Relay: Recall.ai POSTs here, relay forwards to agent WS by room_id
+      // env EXTERNAL_MEETINGS_WEBHOOK_URL = https://recall.trugen.ai/webhook
       const relayBase = (process.env.EXTERNAL_MEETINGS_WEBHOOK_URL || 'https://recall.trugen.ai/webhook')
-        .replace(/^wss:\/\//, 'https://')   // safety: fix if someone put wss:// in env
-        .replace(/^ws:\/\//, 'http://')
-        .replace(/\/ws$/, '/webhook');       // safety: fix if env has /ws path
+        .replace(/^wss?:\/\//, 'https://')
+        .replace(/\/ws$/, '/webhook');
  
       const webhookUrl = `${relayBase}?room_id=${encodeURIComponent(roomId)}`;
- 
-      console.log(`[start-agent] Recall.ai webhook → ${webhookUrl}`);
+      console.log(`[start-agent] Recall webhook: ${webhookUrl}`);
  
       if (!recallToken) {
-        console.warn('[start-agent] EXTERNAL_MEETINGS_API_TOKEN not set — skipping Recall.ai bot');
+        console.warn('[start-agent] EXTERNAL_MEETINGS_API_TOKEN not set');
       } else {
         try {
           const recallBody = {
             meeting_url: meetingUrl,
             bot_name: agent.name || 'AI Assistant',
-            metadata: { roomId },
             recording_config: {
               transcript: {
                 provider: {
-                  recallai_streaming: {
-                    // CRITICAL: without prioritize_low_latency you get 3-10 min delay
-                    mode: 'prioritize_low_latency',
-                    language_code: 'en',
-                  },
+                  // "recallai" = Recall.ai native STT (correct key per docs)
+                  recallai: {},
                 },
               },
-              realtime_endpoints: [
+              // CRITICAL: correct field name is "real_time_endpoints" with underscore
+              // Previous versions used "realtime_endpoints" (no underscore) — WRONG
+              real_time_endpoints: [
                 {
-                  // Use "webhook" (HTTP POST) not "websocket".
-                  // The relay bridges HTTP→WS internally by room_id.
                   type: 'webhook',
                   url: webhookUrl,
+                  // Only use officially documented event names.
+                  // "transcript.partial_data" is NOT in the official list — omit it.
                   events: [
                     'transcript.data',
-                    'transcript.partial_data',
                     'participant_events.join',
                     'participant_events.leave',
+                    'participant_events.speech_on',
+                    'participant_events.speech_off',
                   ],
                 },
               ],
             },
           };
+ 
+          console.log('[start-agent] Bot payload:', JSON.stringify(recallBody, null, 2));
  
           const recallResp = await fetch(recallApiUrl, {
             method: 'POST',
@@ -127,13 +117,13 @@ export async function POST(request: Request) {
           if (recallResp.ok) {
             const recallBot = await recallResp.json() as { id: string };
             recallBotId = recallBot.id;
-            console.log(`[start-agent] ✓ Recall.ai bot created: ${recallBotId}`);
+            console.log(`[start-agent] ✓ Bot created: ${recallBotId}`);
           } else {
             const errText = await recallResp.text();
-            console.error(`[start-agent] Recall.ai bot creation failed (${recallResp.status}): ${errText}`);
+            console.error(`[start-agent] ✗ Bot creation FAILED (${recallResp.status}): ${errText}`);
           }
-        } catch (recallErr: unknown) {
-          console.error('[start-agent] Recall.ai request error:', recallErr);
+        } catch (err: unknown) {
+          console.error('[start-agent] Recall request error:', err);
         }
       }
     }
@@ -149,7 +139,7 @@ export async function POST(request: Request) {
     });
  
     await dispatchClient.createDispatch(roomId, 'clawdface', { metadata });
-    console.log(`[start-agent] Agent dispatched → room=${roomId} recallBotId=${recallBotId ?? 'none'}`);
+    console.log(`[start-agent] ✓ Dispatched → room=${roomId} bot=${recallBotId ?? 'none'}`);
  
     const baseAppUrl = process.env.NEXT_PUBLIC_APP_URL;
     if (!baseAppUrl) {
