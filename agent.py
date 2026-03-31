@@ -87,14 +87,18 @@ def chat_proxy():
         return {"error": str(e)}, 500
  
 def run_proxy():
+    # Attempt to silence the internal Flask logger to avoid messy "Address already in use" output
+    import logging
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)
     try:
-        print("--- OpenClaw Proxy Active (port 4041) ---")
         app.run(host='0.0.0.0', port=4041, debug=False, use_reloader=False)
-    except OSError as e:
-        if "already in use" in str(e).lower():
-            print("[PROXY] Port 4041 already bound - reusing instance.")
-        else:
-            raise
+    except Exception:
+        # If it fails, another worker process probably already has the port.
+        # This is expected in multi-process worker environments.
+        pass
+
+threading.Thread(target=run_proxy, daemon=True).start()
  
 threading.Thread(target=run_proxy, daemon=True).start()
  
@@ -225,7 +229,8 @@ class RecallSpeechStream(stt.SpeechStream):
  
                         msg = json.loads(raw)
                         event = msg.get("event")
-                        logger.info(f"[RECALL] event={event}")  # INFO level so we see every event
+                        # Detailed logging to see what the relay is actually sending
+                        logger.info(f"[RECALL] Incoming event: {event} | Payload: {raw[:300]}")
  
                         if event == "transcript.data":
                             words = msg.get("data", {}).get("data", {}).get("words", [])

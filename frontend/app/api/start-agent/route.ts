@@ -82,8 +82,8 @@ export async function POST(request: Request) {
               // ✅ realtime_endpoints belongs inside recording_config per API docs
               realtime_endpoints: [
                 {
-                  type: 'websocket',
-                  url: webhookUrl,
+                  type: 'webhook',
+                  url: webhookUrl.replace('wss://', 'https://').replace('ws://', 'http://'),
                   events: [
                     'transcript.data',
                     'transcript.partial_data',
