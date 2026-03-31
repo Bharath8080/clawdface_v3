@@ -175,12 +175,16 @@ class RecallSpeechStream(stt.SpeechStream):
         retry_delay = 2
  
         # -----------------------------------------------------------------------
-        # REGISTRATION: Connect directly to the base URL and register using 
-        # ws.send() messages after the handshake. 
+        # RELAY ROUTING: Include room_id (and bot_id) as query params so the relay
+        # can match this agent WS connection to incoming Recall.ai events.
+        # Recall.ai connects to the relay with ?room_id=... in its endpoint URL;
+        # the relay routes by matching the same param on the agent side.
+        # We also send message-based registration as a secondary/fallback protocol.
         # -----------------------------------------------------------------------
-        relay_url = base_url
         room_id = self._room_id or self._ctx.room.name
-
+        relay_url = f"{base_url}?room_id={room_id}"
+        if self._recall_bot_id:
+            relay_url += f"&bot_id={self._recall_bot_id}"
  
         logger.info(f"[RECALL] Relay URL: {relay_url}")
  
