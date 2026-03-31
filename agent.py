@@ -169,56 +169,60 @@ class RecallSpeechStream(stt.SpeechStream):
 
         while True:
             try:
-                logger.info(f"[RECALL] Connecting to relay: {relay_url} for room: {room_name}")
+                logger.info(f"[RECALL] Connecting to relay: {relay_url} room={room_name}")
                 async with websockets.connect(
                     relay_url,
                     ping_interval=20,
                     ping_timeout=20,
                     open_timeout=15,
                 ) as ws:
+                    # Register BOTH identifiers so relay can route by either
                     await ws.send(json.dumps({"type": "set_lk_room_id", "data": room_name}))
                     
-                    # Also register bot_id as a primary routing key for the relay
                     if self._recall_bot_id:
                         await ws.send(json.dumps({"type": "set_bot_id", "data": self._recall_bot_id}))
-                        logger.info(f"[RECALL] Registered bot_id with relay: {self._recall_bot_id}")
+                        logger.info(f"[RECALL] Registered bot_id={self._recall_bot_id}")
                     
-                    logger.info(f"[RECALL] Connected to relay for room: {room_name}")
+                    logger.info(f"[RECALL] ✓ Relay connected, waiting for transcript events...")
                     retry_delay = 2
+
                     while True:
                         try:
-                            # Timeout prevents dead connections from hanging the STT stream
                             raw = await asyncio.wait_for(ws.recv(), timeout=30.0)
                         except asyncio.TimeoutError:
-                            logger.warning("[RECALL] recv() timed out (30s) — sending ping to keep relay alive")
+                            logger.debug("[RECALL] keepalive ping")
                             await ws.ping()
                             continue
 
                         msg = json.loads(raw)
-                        logger.debug(f"[RECALL] Relay message: {msg}")
                         event = msg.get("event")
+                        logger.debug(f"[RECALL] event={event}")
 
                         if event == "transcript.data":
                             words = msg.get("data", {}).get("data", {}).get("words", [])
-                            text = " ".join(w.get("text", "") for w in words if isinstance(w, dict) and w.get("text")).strip()
+                            text = " ".join(
+                                w.get("text", "") for w in words
+                                if isinstance(w, dict) and w.get("text")
+                            ).strip()
                             if text:
                                 participant = msg.get("data", {}).get("data", {}).get("participant", {})
-                                speaker = participant.get("name") if isinstance(participant, dict) else "Unknown"
+                                speaker = participant.get("name", "Unknown") if isinstance(participant, dict) else "Unknown"
                                 logger.info(f"[RECALL] FINAL | {speaker}: {text}")
-                                # Flow: Recall STT → Proxy LLM → ElevenLabs TTS
                                 self._emit_final(f"{speaker}: {text}")
 
                         elif event == "transcript.partial_data":
                             words = msg.get("data", {}).get("data", {}).get("words", [])
-                            text = " ".join(w.get("text", "") for w in words if isinstance(w, dict) and w.get("text")).strip()
+                            text = " ".join(
+                                w.get("text", "") for w in words
+                                if isinstance(w, dict) and w.get("text")
+                            ).strip()
                             if text:
-                                logger.debug(f"[RECALL] PARTIAL | {text}")
                                 self._emit_interim(text)
 
                         elif event == "participant_events.join":
                             participant = msg.get("data", {}).get("data", {}).get("participant", {})
                             name = participant.get("name", "Unknown") if isinstance(participant, dict) else "Unknown"
-                            logger.info(f"[RECALL] Participant joined: {name}")
+                            logger.info(f"[RECALL] ✓ Participant joined: {name}")
 
                         elif event == "participant_events.leave":
                             participant = msg.get("data", {}).get("data", {}).get("participant", {})
@@ -226,11 +230,11 @@ class RecallSpeechStream(stt.SpeechStream):
                             logger.info(f"[RECALL] Participant left: {name}")
 
             except websockets.ConnectionClosed as e:
-                logger.warning(f"[RECALL] Connection closed: {e}. Retrying in {retry_delay}s...")
+                logger.warning(f"[RECALL] Connection closed: {e}. Retry in {retry_delay}s")
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 30)
             except Exception as e:
-                logger.error(f"[RECALL] Connection error: {e}. Retrying in {retry_delay}s...", exc_info=True)
+                logger.error(f"[RECALL] Error: {e}. Retry in {retry_delay}s", exc_info=True)
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 30)
 
