@@ -159,8 +159,8 @@ class RecallSpeechStream(stt.SpeechStream):
         if not self._speaking:
             self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH, alternatives=[]))
             self._speaking = True
-        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.END_OF_SPEECH, alternatives=[stt.SpeechData(text=text, language="en")]))
-        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.FINAL_TRANSCRIPT, alternatives=[stt.SpeechData(text=text, language="en")]))
+        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.END_OF_SPEECH, alternatives=[stt.SpeechData(text=text, language="en")]))  # type: ignore
+        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.FINAL_TRANSCRIPT, alternatives=[stt.SpeechData(text=text, language="en")]))  # type: ignore
         self._speaking = False
  
     def _emit_interim(self, text: str):
@@ -168,40 +168,47 @@ class RecallSpeechStream(stt.SpeechStream):
         if not self._speaking:
             self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH, alternatives=[]))
             self._speaking = True
-        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.INTERIM_TRANSCRIPT, alternatives=[stt.SpeechData(text=text, language="en")]))
+        self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.INTERIM_TRANSCRIPT, alternatives=[stt.SpeechData(text=text, language="en")]))  # type: ignore
  
     async def _run(self) -> None:
         base_url = os.getenv("EXTERNAL_MEETINGS_WS_URL", "wss://recall.trugen.ai/ws").strip()
         retry_delay = 2
  
         # -----------------------------------------------------------------------
-        # KEY FIX: connect with room_id AND bot_id as query params so the relay
-        # can route incoming Recall.ai webhook POSTs to this exact WS connection.
-        # This is the correct way to register with the trugen relay server.
+        # REGISTRATION: Connect directly to the base URL and register using 
+        # ws.send() messages after the handshake. 
         # -----------------------------------------------------------------------
+        relay_url = base_url
         room_id = self._room_id or self._ctx.room.name
-        params = f"room_id={room_id}"
-        if self._recall_bot_id:
-            params += f"&bot_id={self._recall_bot_id}"
-        relay_url = f"{base_url}?{params}"
+
  
         logger.info(f"[RECALL] Relay URL: {relay_url}")
  
         while True:
             try:
-                logger.info(f"[RECALL] Connecting to relay...")
+                logger.info(f"[RECALL] Initializing WebSocket connection to {relay_url}...")
                 async with websockets.connect(
                     relay_url,
                     ping_interval=20,
                     ping_timeout=20,
                     open_timeout=15,
                 ) as ws:
-                    # Also send registration messages in case relay uses message-based routing
-                    await ws.send(json.dumps({"type": "set_lk_room_id", "data": room_id}))
+                    logger.info("[RECALL] Handshake successful. Sending registration messages...")
+                    
+                    # 1. Register Room ID
+                    reg_room = {"type": "set_lk_room_id", "data": room_id}
+                    logger.info(f"[RECALL] Registration \u2192 {reg_room}")
+                    await ws.send(json.dumps(reg_room))
+                    
+                    # 2. Register Bot ID (optional)
                     if self._recall_bot_id:
-                        await ws.send(json.dumps({"type": "set_bot_id", "data": self._recall_bot_id}))
+                        reg_bot = {"type": "set_bot_id", "data": self._recall_bot_id}
+                        logger.info(f"[RECALL] Registration \u2192 {reg_bot}")
+                        await ws.send(json.dumps(reg_bot))
+                    else:
+                        logger.warning("[RECALL] No bot_id provided for registration. This might limit filtering on the relay.")
  
-                    logger.info(f"[RECALL] ✓ Connected. room_id={room_id} bot_id={self._recall_bot_id or 'none'}")
+                    logger.info(f"[RECALL] \u2713 Registration complete. room_id={room_id}")
                     retry_delay = 2
  
                     while True:
@@ -252,12 +259,16 @@ class RecallSpeechStream(stt.SpeechStream):
                             # Log ANY unrecognised event so we can debug relay message format
                             logger.info(f"[RECALL] Unknown event type: {event} | raw: {raw[:200]}")
  
+            except websockets.InvalidHandshake as e:
+                logger.error(f"[RECALL] \u2717 Protocol error during handshake: {e}. Check if the URL is a valid WS/WSS endpoint. Retrying...")
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 30)
             except websockets.ConnectionClosed as e:
-                logger.warning(f"[RECALL] Connection closed: {e}. Retry in {retry_delay}s")
+                logger.warning(f"[RECALL] ! Connection closed unexpectedly: {e} (code={e.code}). Attempting reconnect in {retry_delay}s...")
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 30)
             except Exception as e:
-                logger.error(f"[RECALL] Error: {e}. Retry in {retry_delay}s", exc_info=True)
+                logger.error(f"[RECALL] \u2717 Unexpected error in relay loop: {e}. Full context follows:", exc_info=True)
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 30)
  
@@ -330,7 +341,8 @@ def setup_langfuse(metadata: dict):
         return None
  
     auth = base64.b64encode(f"{pub}:{sec}".encode()).decode()
-    os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = f"{host.rstrip('/')}/api/public/otel"
+    safe_host = str(host).rstrip("/")
+    os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = f"{safe_host}/api/public/otel"
     os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"Authorization=Basic {auth}"
  
     tp = TracerProvider()

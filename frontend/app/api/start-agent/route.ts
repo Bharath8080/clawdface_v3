@@ -79,16 +79,15 @@ export async function POST(request: Request) {
                   recallai: {},
                 },
               },
-              // CRITICAL: correct field name is "real_time_endpoints" with underscore
-              // Previous versions used "realtime_endpoints" (no underscore) — WRONG
-              real_time_endpoints: [
+              // CORRECT: The field name is "realtime_endpoints" (no underscore)
+              realtime_endpoints: [
                 {
                   type: 'websocket',
                   url: webhookUrl,
-                  // Only use officially documented event names.
-                  // "transcript.partial_data" is NOT in the official list — omit it.
+                  // Include both transcript.data and transcript.partial_data.
                   events: [
                     'transcript.data',
+                    'transcript.partial_data',
                     'participant_events.join',
                     'participant_events.leave',
                     'participant_events.speech_on',
@@ -113,13 +112,19 @@ export async function POST(request: Request) {
           if (recallResp.ok) {
             const recallBot = await recallResp.json() as { id: string };
             recallBotId = recallBot.id;
-            console.log(`[start-agent] ✓ Bot created: ${recallBotId}`);
+            console.log(`[start-agent] \u2713 Recall.ai bot created successfully: ${recallBotId}`);
           } else {
-            const errText = await recallResp.text();
-            console.error(`[start-agent] ✗ Bot creation FAILED (${recallResp.status}): ${errText}`);
+            let errDetail = '';
+            try {
+              errDetail = await recallResp.text();
+            } catch {
+              errDetail = 'Could not read error response body';
+            }
+            console.error(`[start-agent] \u2717 Recall.ai API Failure | Status: ${recallResp.status} ${recallResp.statusText} | Detail: ${errDetail}`);
           }
         } catch (err: unknown) {
-          console.error('[start-agent] Recall request error:', err);
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.error(`[start-agent] \u2717 Network error contacting Recall.ai: ${errMsg}`);
         }
       }
     }
