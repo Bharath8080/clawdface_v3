@@ -75,22 +75,21 @@ export async function POST(request: Request) {
             recording_config: {
               transcript: {
                 provider: {
-                  // ✅ CORRECT key per Recall.ai docs — "recallai_streaming" for real-time STT
-                  recallai_streaming: {},
+                  recallai_streaming: {
+                    mode: 'prioritize_low_latency',
+                    language_code: 'en',
+                  },
                 },
               },
-              // ✅ realtime_endpoints belongs inside recording_config per API docs
               realtime_endpoints: [
                 {
                   type: 'webhook',
-                  url: webhookUrl.replace('wss://', 'https://').replace('ws://', 'http://'),
+                  url: webhookUrl,
                   events: [
                     'transcript.data',
                     'transcript.partial_data',
                     'participant_events.join',
                     'participant_events.leave',
-                    'participant_events.speech_on',
-                    'participant_events.speech_off',
                   ],
                 },
               ],

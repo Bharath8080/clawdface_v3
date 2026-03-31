@@ -205,18 +205,18 @@ class RecallSpeechStream(stt.SpeechStream):
                     
                     # 1. Register Room ID
                     reg_room = {"type": "set_lk_room_id", "data": room_id}
-                    logger.info(f"[RECALL] Registration \u2192 {reg_room}")
+                    logger.info(f"[RECALL] Sending Room Registration \u2192 {reg_room}")
                     await ws.send(json.dumps(reg_room))
                     
                     # 2. Register Bot ID (optional)
                     if self._recall_bot_id:
                         reg_bot = {"type": "set_bot_id", "data": self._recall_bot_id}
-                        logger.info(f"[RECALL] Registration \u2192 {reg_bot}")
+                        logger.info(f"[RECALL] Sending Bot Registration \u2192 {reg_bot}")
                         await ws.send(json.dumps(reg_bot))
                     else:
-                        logger.warning("[RECALL] No bot_id provided for registration. This might limit filtering on the relay.")
+                        logger.warning("[RECALL] No bot_id provided for registration. Routing might depend solely on room_id.")
  
-                    logger.info(f"[RECALL] \u2713 Registration complete. room_id={room_id}")
+                    logger.info(f"[RECALL] \u2713 Handshake and registration successful. Room: {room_id}")
                     retry_delay = 2
  
                     while True:
