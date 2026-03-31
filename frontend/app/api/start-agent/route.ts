@@ -75,16 +75,15 @@ export async function POST(request: Request) {
             recording_config: {
               transcript: {
                 provider: {
-                  // "recallai" = Recall.ai native STT (correct key per docs)
-                  recallai: {},
+                  // ✅ CORRECT key per Recall.ai docs — "recallai_streaming" for real-time STT
+                  recallai_streaming: {},
                 },
               },
-              // CORRECT: The field name is "realtime_endpoints" (no underscore)
+              // ✅ realtime_endpoints belongs inside recording_config per API docs
               realtime_endpoints: [
                 {
                   type: 'websocket',
                   url: webhookUrl,
-                  // Include both transcript.data and transcript.partial_data.
                   events: [
                     'transcript.data',
                     'transcript.partial_data',
