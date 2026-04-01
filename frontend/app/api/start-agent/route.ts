@@ -161,7 +161,7 @@ export async function POST(request: Request) {
       userEmail:   userEmail  || null,
       agentName:   agent.name,
       avatarId:    agent.avatar_id,
-      roomId:      livekitRoom.sid,
+      roomId:      roomId,
       sessionKey,
       recallBotId,
     });
