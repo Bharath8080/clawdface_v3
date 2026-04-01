@@ -57,7 +57,7 @@ export async function POST(request: Request) {
     let recallBotId: string | null = null;
  
     if (meetingUrl) {
-      const recallApiUrl = process.env.EXTERNAL_MEETINGS_API_URL || 'https://us-west-2.recall.ai/api/v1/bot/';
+      const recallApiUrl = (process.env.EXTERNAL_MEETINGS_API_URL || 'https://us-west-2.recall.ai/api/v1/bot').replace(/\/$/, '');
       const recallToken  = process.env.EXTERNAL_MEETINGS_API_TOKEN;
  
       const relayBase = process.env.EXTERNAL_MEETINGS_WEBHOOK_URL || 'https://recall.trugen.ai/webhook';

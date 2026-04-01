@@ -138,6 +138,7 @@ class RecallAIDirectSTT(stt.STT):
         return stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH, alternatives=[])
  
     def stream(self, *, language: NotGivenOr[str] = NOT_GIVEN, conn_options: APIConnectOptions = APIConnectOptions()) -> "RecallSpeechStream":
+        logger.info(f"[STT] Creating new RecallSpeechStream... bot_id={self._recall_bot_id}")
         return RecallSpeechStream(
             stt=self,
             conn_options=conn_options,
@@ -227,30 +228,29 @@ class RecallSpeechStream(stt.SpeechStream):
  
                         msg = json.loads(raw)
                         event = msg.get("event")
-                        # Detailed logging to see what the relay is actually sending
-                        logger.info(f"[RECALL] Incoming event: {event} | Payload: {raw[:300]}")
- 
-                        if event == "transcript.data":
-                            words = msg.get("data", {}).get("data", {}).get("words", [])
+                        logger.info(f"[RECALL] Incoming event: {event} | Payload: {raw}")
+
+                        if event in ("transcript.data", "transcript.partial_data"):
+                            # Robust parsing: try nested 'data.data' then fall back to 'data'
+                            inner_data = msg.get("data", {})
+                            if isinstance(inner_data, dict) and "data" in inner_data:
+                                inner_data = inner_data.get("data", {})
+                            
+                            words = inner_data.get("words", []) if isinstance(inner_data, dict) else []
                             text = " ".join(
                                 w.get("text", "") for w in words
                                 if isinstance(w, dict) and w.get("text")
                             ).strip()
+
                             if text:
-                                participant = msg.get("data", {}).get("data", {}).get("participant", {})
-                                speaker = participant.get("name", "Unknown") if isinstance(participant, dict) else "Unknown"
-                                logger.info(f"[RECALL] FINAL | {speaker}: {text}")
-                                self._emit_final(f"{speaker}: {text}")
- 
-                        elif event == "transcript.partial_data":
-                            words = msg.get("data", {}).get("data", {}).get("words", [])
-                            text = " ".join(
-                                w.get("text", "") for w in words
-                                if isinstance(w, dict) and w.get("text")
-                            ).strip()
-                            if text:
-                                logger.debug(f"[RECALL] PARTIAL: {text}")
-                                self._emit_interim(text)
+                                if event == "transcript.data":
+                                    participant = inner_data.get("participant", {})
+                                    speaker = participant.get("name", "Unknown") if isinstance(participant, dict) else "Unknown"
+                                    logger.info(f"[RECALL] FINAL | {speaker}: {text}")
+                                    self._emit_final(f"{speaker}: {text}")
+                                else:
+                                    logger.debug(f"[RECALL] PARTIAL: {text}")
+                                    self._emit_interim(text)
  
                         elif event == "participant_events.join":
                             participant = msg.get("data", {}).get("data", {}).get("participant", {})
@@ -290,6 +290,15 @@ class MeetingVAD(agents.vad.VAD):
  
 class MeetingVADStream(agents.vad.VADStream):
     async def _main_task(self):
+        # Pulse speech start to wake up the session
+        self._event_ch.send_nowait(agents.vad.VADEvent(
+            type=agents.vad.VADEventType.START_OF_SPEECH, 
+            frames=[], 
+            samples_index=0, 
+            timestamp=0.0, 
+            speech_duration=0.1, 
+            silence_duration=0.0
+        ))
         while True:
             await asyncio.sleep(3600)
  
@@ -389,6 +398,10 @@ async def my_agent(ctx: agents.JobContext):
         config, connection_type = resolve_config(ctx)
         if config: break
         await asyncio.sleep(0.5)
+
+    logger.info(f"[METADATA] Resolution Completed | Mode: {connection_type.upper()}")
+    logger.info(f"[METADATA] Room Metadata: {ctx.room.metadata[:300]}")
+    logger.info(f"[METADATA] Job Metadata: {ctx.job.metadata[:300]}")
 
     if not config:
         logger.error(f"[SESSION] \u2717 Failed to resolve config for room {ctx.room.name}")
@@ -490,4 +503,4 @@ if __name__ == "__main__":
     # Start proxy once
     threading.Thread(target=run_proxy, daemon=True).start()
     
-    cli.run_app(server)
+    cli.run_app(server)
