@@ -98,9 +98,7 @@ def run_proxy():
         # This is expected in multi-process worker environments.
         pass
 
-threading.Thread(target=run_proxy, daemon=True).start()
- 
-threading.Thread(target=run_proxy, daemon=True).start()
+# (Single proxy start at the bottom of the file)
  
 # ---------------------------------------------------------------------------
 # CONFIG RESOLUTION
@@ -297,22 +295,28 @@ class MeetingVADStream(agents.vad.VADStream):
  
  
 def resolve_config(ctx: agents.JobContext) -> tuple[dict, str]:
-    # 1. Job Metadata
+    # 1. Job Metadata (Highest Priority for Dispatches)
     try:
         if ctx.job and ctx.job.metadata:
             cfg = json.loads(ctx.job.metadata)
+            if cfg.get("recallBotId"):
+                return cfg, "recall"
             if cfg.get("openclawUrl"):
                 return cfg, "email_dispatch"
-    except: pass
- 
+    except Exception as e:
+        logger.debug(f"[CONFIG] Failed to parse job metadata: {e}")
+
     # 2. Room Metadata
     try:
         if ctx.room.metadata:
             cfg = json.loads(ctx.room.metadata)
+            if cfg.get("recallBotId"):
+                 return cfg, "recall"
             if cfg.get("openclawUrl"):
                 return cfg, "room_metadata"
-    except: pass
- 
+    except Exception as e:
+        logger.debug(f"[CONFIG] Failed to parse room metadata: {e}")
+
     # 3. Participant Metadata
     for p in ctx.room.remote_participants.values():
         try:
@@ -320,9 +324,10 @@ def resolve_config(ctx: agents.JobContext) -> tuple[dict, str]:
                 cfg = json.loads(p.metadata)
                 if cfg.get("openclawUrl"):
                     type = "url_share" if str(cfg.get("sessionKey", "")).startswith("session-") else "website"
+                    if cfg.get("recallBotId"): type = "recall"
                     return cfg, type
         except: pass
- 
+
     # 4. Backend Dynamic Lookup (by Room Name/Email)
     room_id = ctx.room.name
     if room_id and not room_id.startswith("room-"):
@@ -330,13 +335,16 @@ def resolve_config(ctx: agents.JobContext) -> tuple[dict, str]:
         try:
             base_url = os.getenv("FRONTEND_URL", "").rstrip("/")
             if base_url:
+                logger.info(f"[CONFIG] Fetching sync config for {email}...")
                 resp = requests.get(f"{base_url}/api/agents/config?email={email}", timeout=5)
                 if resp.status_code == 200:
                     cfg = resp.json()
                     if cfg.get("openclawUrl"):
-                        return cfg, "email_dispatch"
-        except: pass
- 
+                        mode = "recall" if cfg.get("recallBotId") else "email_dispatch"
+                        return cfg, mode
+        except Exception as e:
+            logger.debug(f"[CONFIG] Lookup error for {email}: {e}")
+
     return {}, "unknown"
  
  
@@ -381,19 +389,17 @@ async def my_agent(ctx: agents.JobContext):
         config, connection_type = resolve_config(ctx)
         if config: break
         await asyncio.sleep(0.5)
- 
+
     if not config:
-        print(f"[SESSION] \u2717 Failed to resolve config for room {ctx.room.name}")
+        logger.error(f"[SESSION] \u2717 Failed to resolve config for room {ctx.room.name}")
         return
- 
+
     url = config.get("openclawUrl", "").strip()
     token = config.get("gatewayToken", "")
     key = config.get("sessionKey", "")
     avatar_id = config.get("avatarId") or os.getenv("TRUGEN_AVATAR_ID") or DEFAULT_AVATAR_ID
     voice_id = "CwhRBWXzGAHq8TQ4Fs17" if avatar_id in MALE_AVATAR_IDS else "FGY2WhTYpPnrIDTdsKH5"
- 
-    print(f"[SESSION] Start: {connection_type} | Avatar: {avatar_id} | Voice: {voice_id}")
- 
+
     tp = setup_langfuse({
         "langfuse.session.id": ctx.room.name,
         "langfuse.user.id": key,
@@ -402,12 +408,12 @@ async def my_agent(ctx: agents.JobContext):
         "avatar.id": avatar_id,
         "room.name": ctx.room.name
     })
- 
+
     if tp:
         async def _flush_sync() -> None:
             tp.force_flush()
         ctx.add_shutdown_callback(_flush_sync)
- 
+
     import openai as _openai
     mega_token = f"{url}|{token}|{key}"
     llm = openai.LLM(
@@ -421,26 +427,23 @@ async def my_agent(ctx: agents.JobContext):
             max_retries=0
         )
     )
- 
-    if connection_type in ("email_dispatch", "recall"):
+
+    if connection_type in ("email_dispatch", "recall") or config.get("recallBotId"):
         recall_bot_id = config.get("recallBotId", "") or ""
-        # -----------------------------------------------------------------------
-        # Pass the LiveKit room name as room_id so the relay can match
-        # this WebSocket connection to the Recall.ai webhook POST for this room.
-        # -----------------------------------------------------------------------
         livekit_room_name = ctx.room.name
-        print(f"[STT] Meeting mode → RecallAIDirectSTT | room={livekit_room_name} | bot_id={recall_bot_id or 'none'}")
-        logger.info(f"[CONFIG] url={config.get('openclawUrl','')} | bot_id={recall_bot_id} | meetingUrl={config.get('meetingUrl','')}")
+        logger.info(f"[SESSION] Start: {connection_type} | Mode: RECALL | Bot: {recall_bot_id or 'none'}")
+        logger.info(f"[STT] Meeting mode \u2192 RecallAIDirectSTT | room={livekit_room_name}")
         stt_provider = RecallAIDirectSTT(ctx=ctx, recall_bot_id=recall_bot_id, room_id=livekit_room_name)
         vad_provider = MeetingVAD()
     else:
-        print(f"[STT] Standard mode → Deepgram STTv2 (Flux)")
+        logger.info(f"[SESSION] Start: {connection_type} | Mode: STANDARD")
+        logger.info(f"[STT] Standard mode \u2192 Deepgram STTv2 (Flux)")
         stt_provider = deepgram.STTv2(
             model="flux-general-en",
             eager_eot_threshold=0.4,
         )
         vad_provider = silero.VAD.load()
- 
+
     session = AgentSession(
         stt=stt_provider,
         vad=vad_provider,
@@ -450,37 +453,41 @@ async def my_agent(ctx: agents.JobContext):
             llm_conn_options=APIConnectOptions(timeout=300.0, max_retry=0)
         )
     )
- 
+
     @session.on("user_input_transcribed")
     def on_user_speech(ev: agents.UserInputTranscribedEvent):
         if ev.transcript:
-            print(f"[STT] ✓ Transcribed: {ev.transcript}")
- 
+            logger.info(f"[STT] \u2713 Transcribed: {ev.transcript}")
+
     @session.on("conversation_item_added")
     def on_item_added(ev: agents.ConversationItemAddedEvent):
         if getattr(ev.item, "role", None) == "assistant":
             content = getattr(ev.item, "content", None)
-            if content: print(f"[TTS] Avatar: {content}")
- 
-    if connection_type in ("email_dispatch", "recall"):
+            if content: logger.info(f"[TTS] Avatar: {content}")
+
+    if connection_type in ("email_dispatch", "recall") or config.get("recallBotId"):
         room_opts = RoomOptions(close_on_disconnect=False)
-        logger.info("[SESSION] Meeting mode: close_on_disconnect=False")
+        logger.info("[SESSION] Meeting mode active: close_on_disconnect=False")
     else:
         room_opts = NOT_GIVEN
- 
+
     try:
         trugen_avatar = trugen.AvatarSession(avatar_id=avatar_id)
         await trugen_avatar.start(session, room=ctx.room)
         await session.start(MyAgent(), room=ctx.room, room_options=room_opts)
         session.say("Hello! Let's get started.")
     except Exception as e:
-        print(f"[SESSION] ✗ Fatal error: {e}")
+        logger.error(f"[SESSION] ✗ Fatal error: {e}")
         raise
- 
- 
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "download-files":
         silero.VAD.load()
         sys.exit(0)
-    cli.run_app(server)
+    
+    # Start proxy once
+    threading.Thread(target=run_proxy, daemon=True).start()
+    
+    cli.run_app(server)
