@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     const roomService    = new RoomServiceClient(LIVEKIT_URL, API_KEY, API_SECRET);
     const dispatchClient = new AgentDispatchClient(LIVEKIT_URL, API_KEY, API_SECRET);
  
-    const livekitRoom = await roomService.createRoom({
+    await roomService.createRoom({
       name: roomId,
       emptyTimeout: 10 * 60,
       maxParticipants: 10,
@@ -62,10 +62,7 @@ export async function POST(request: Request) {
  
       const relayBase = process.env.EXTERNAL_MEETINGS_WEBHOOK_URL || '';
  
-      const webhookUrl = `${relayBase}?room_id=${encodeURIComponent(roomId)}`;
-      if (!relayBase) {
-        throw new Error('EXTERNAL_MEETINGS_WEBHOOK_URL is missing. If you just added it to .env.local, please restart the Next.js dev server!');
-      }
+      const webhookUrl = relayBase;
       console.log(`[start-agent] Recall webhook: ${webhookUrl}`);
  
       if (!recallToken) {
@@ -161,7 +158,7 @@ export async function POST(request: Request) {
       userEmail:   userEmail  || null,
       agentName:   agent.name,
       avatarId:    agent.avatar_id,
-      roomId:      roomId,
+      roomId,
       sessionKey,
       recallBotId,
     });
