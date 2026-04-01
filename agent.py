@@ -3,10 +3,8 @@ import json
 import asyncio
 import base64
 import requests
-import threading
 import typing
 import logging
-from flask import Flask, request, Response
 from dotenv import load_dotenv
 from livekit import agents
 from livekit.agents import Agent, AgentServer, AgentSession, cli, metrics, APIConnectOptions
@@ -30,75 +28,7 @@ from livekit.agents.voice.room_io import RoomOptions
 load_dotenv()
 logger = logging.getLogger("trugen-agent")
  
-# ---------------------------------------------------------------------------
-# OPENCLAW SESSION PROXY (Port 4041)
-# ---------------------------------------------------------------------------
-app = Flask(__name__)
- 
-@app.route('/v1/chat/completions', methods=['POST'])
-def chat_proxy():
-    try:
-        data = request.get_json()
-        messages = data.get('messages', [])
- 
-        auth_header = request.headers.get("Authorization", "")
-        token_str = auth_header.replace("Bearer ", "")
-       
-        if "|" not in token_str:
-             print("[PROXY] \u2717 Invalid Mega-Token format")
-             return {"error": "Invalid token format. URL|TOKEN|KEY expected."}, 400
- 
-        parts = token_str.split("|")
-        target_url = parts[0]
-        gate_token = parts[1]
-        sess_key   = parts[2]
- 
-        print(f"[PROXY] \u2192 {target_url} session={sess_key}")
- 
-        new_messages = [m for m in messages if m.get("role") != "system"][-10:]
- 
-        if not new_messages:
-            return {"error": "No messages to forward"}, 400
- 
-        headers = {
-            "Authorization": f"Bearer {gate_token}",
-            "x-openclaw-session-key": sess_key,
-            "x-openclaw-agent-id": "main",
-            "ngrok-skip-browser-warning": "true"
-        }
- 
-        resp = requests.post(
-            f"{target_url}/v1/chat/completions",
-            headers=headers,
-            json={"model": "openclaw", "messages": new_messages, "stream": data.get("stream", True)},
-            stream=True,
-            timeout=None
-        )
- 
-        def generate():
-            for chunk in resp.iter_content(chunk_size=None):
-                if chunk:
-                    yield chunk
- 
-        return Response(generate(), resp.status_code, {"Content-Type": "text/event-stream"})
- 
-    except Exception as e:
-        print(f"[PROXY] Error: {e}")
-        return {"error": str(e)}, 500
- 
-def run_proxy():
-    # Attempt to silence the internal Flask logger to avoid messy "Address already in use" output
-    import logging
-    log = logging.getLogger('werkzeug')
-    log.setLevel(logging.ERROR)
-    try:
-        app.run(host='0.0.0.0', port=4041, debug=False, use_reloader=False)
-    except Exception:
-        # If it fails, another worker process probably already has the port.
-        # This is expected in multi-process worker environments.
-        pass
 
-# (Single proxy start at the bottom of the file)
  
 # ---------------------------------------------------------------------------
 # CONFIG RESOLUTION
@@ -174,7 +104,9 @@ class RecallSpeechStream(stt.SpeechStream):
         self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.INTERIM_TRANSCRIPT, alternatives=[stt.SpeechData(text=text, language="en")]))  # type: ignore
  
     async def _run(self) -> None:
-        base_url = os.getenv("EXTERNAL_MEETINGS_WS_URL", "wss://recall.trugen.ai/ws").strip()
+        base_url = os.getenv("EXTERNAL_MEETINGS_WS_URL", "").strip()
+        if not base_url:
+            logger.warning("[RECALL] EXTERNAL_MEETINGS_WS_URL is not set!")
         retry_delay = 2
  
         # -----------------------------------------------------------------------
@@ -275,30 +207,7 @@ class RecallSpeechStream(stt.SpeechStream):
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 30)
  
- 
-# ---------------------------------------------------------------------------
-# MEETING VAD
-# ---------------------------------------------------------------------------
-class MeetingVAD(agents.vad.VAD):
-    def __init__(self):
-        super().__init__(capabilities=agents.vad.VADCapabilities(update_interval=0.1))
-    def stream(self): return MeetingVADStream(self)
- 
-class MeetingVADStream(agents.vad.VADStream):
-    async def _main_task(self):
-        # Pulse speech start to wake up the session
-        self._event_ch.send_nowait(agents.vad.VADEvent(
-            type=agents.vad.VADEventType.START_OF_SPEECH, 
-            frames=[], 
-            samples_index=0, 
-            timestamp=0.0, 
-            speech_duration=0.1, 
-            silence_duration=0.0
-        ))
-        while True:
-            await asyncio.sleep(3600)
- 
- 
+  
 def resolve_config(ctx: agents.JobContext) -> tuple[dict, str]:
     # 1. Job Metadata (Highest Priority for Dispatches)
     try:
@@ -424,26 +333,28 @@ async def my_agent(ctx: agents.JobContext):
         ctx.add_shutdown_callback(_flush_sync)
 
     import openai as _openai
-    mega_token = f"{url}|{token}|{key}"
     llm = openai.LLM(
         model="openclaw",
-        base_url="http://localhost:4041/v1",
-        api_key=mega_token,
         client=_openai.AsyncOpenAI(
-            base_url="http://localhost:4041/v1",
-            api_key=mega_token,
+            base_url=f"{url}/v1",
+            api_key=token,
+            default_headers={
+                "x-openclaw-session-key": key,
+                "x-openclaw-agent-id": "main",
+                "ngrok-skip-browser-warning": "true"
+            },
             timeout=None,
             max_retries=0
         )
     )
 
+    vad_provider = silero.VAD.load()
     if connection_type in ("email_dispatch", "recall") or config.get("recallBotId"):
         recall_bot_id = config.get("recallBotId", "") or ""
         livekit_room_name = ctx.room.name
         logger.info(f"[SESSION] Start: {connection_type} | Mode: RECALL | Bot: {recall_bot_id or 'none'}")
         logger.info(f"[STT] Meeting mode \u2192 RecallAIDirectSTT | room={livekit_room_name}")
         stt_provider = RecallAIDirectSTT(ctx=ctx, recall_bot_id=recall_bot_id, room_id=livekit_room_name)
-        vad_provider = MeetingVAD()
     else:
         logger.info(f"[SESSION] Start: {connection_type} | Mode: STANDARD")
         logger.info(f"[STT] Standard mode \u2192 Deepgram STTv2 (Flux)")
@@ -451,7 +362,6 @@ async def my_agent(ctx: agents.JobContext):
             model="flux-general-en",
             eager_eot_threshold=0.4,
         )
-        vad_provider = silero.VAD.load()
 
     session = AgentSession(
         stt=stt_provider,
@@ -495,8 +405,5 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "download-files":
         silero.VAD.load()
         sys.exit(0)
-    
-    # Start proxy once
-    threading.Thread(target=run_proxy, daemon=True).start()
     
     cli.run_app(server)
