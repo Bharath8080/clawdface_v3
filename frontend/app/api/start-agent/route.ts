@@ -62,7 +62,10 @@ export async function POST(request: Request) {
  
       const relayBase = process.env.EXTERNAL_MEETINGS_WEBHOOK_URL || '';
  
-      const webhookUrl = relayBase;
+      const webhookUrl = `${relayBase}?room_id=${encodeURIComponent(roomId)}`;
+      if (!relayBase) {
+        throw new Error('EXTERNAL_MEETINGS_WEBHOOK_URL is missing. If you just added it to .env.local, please restart the Next.js dev server!');
+      }
       console.log(`[start-agent] Recall webhook: ${webhookUrl}`);
  
       if (!recallToken) {

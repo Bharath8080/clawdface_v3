@@ -5,6 +5,7 @@ import base64
 import requests
 import typing
 import logging
+import urllib.parse
 from dotenv import load_dotenv
 from livekit import agents
 from livekit.agents import Agent, AgentServer, AgentSession, cli, metrics, APIConnectOptions
@@ -117,13 +118,21 @@ class RecallSpeechStream(stt.SpeechStream):
         # We also send message-based registration as a secondary/fallback protocol.
         # -----------------------------------------------------------------------
         room_id = self._room_id or self._ctx.room.name
-        logger.info(f"[RECALL] Base URL: {base_url}")
+        
+        # -----------------------------------------------------------------------
+        # Append room_id (and bot_id if available) to the connection URL
+        # -----------------------------------------------------------------------
+        ws_url = f"{base_url}?room_id={urllib.parse.quote(room_id)}"
+        if self._recall_bot_id:
+            ws_url += f"&bot_id={urllib.parse.quote(self._recall_bot_id)}"
+            
+        logger.info(f"[RECALL] Connection URL: {ws_url}")
  
         while True:
             try:
-                logger.info(f"[RECALL] Initializing WebSocket connection to {base_url}...")
+                logger.info(f"[RECALL] Initializing WebSocket connection to {ws_url}...")
                 async with websockets.connect(
-                    base_url,
+                    ws_url,
                     ping_interval=20,
                     ping_timeout=20,
                     open_timeout=15,
