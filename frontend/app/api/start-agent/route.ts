@@ -62,7 +62,7 @@ export async function POST(request: Request) {
  
       const relayBase = process.env.EXTERNAL_MEETINGS_WEBHOOK_URL || 'https://recall.trugen.ai/webhook';
  
-      const webhookUrl = `${relayBase}?room_id=${encodeURIComponent(roomId)}`;
+      const webhookUrl = relayBase;
       console.log(`[start-agent] Recall webhook: ${webhookUrl}`);
  
       if (!recallToken) {

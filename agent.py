@@ -185,17 +185,13 @@ class RecallSpeechStream(stt.SpeechStream):
         # We also send message-based registration as a secondary/fallback protocol.
         # -----------------------------------------------------------------------
         room_id = self._room_id or self._ctx.room.name
-        relay_url = f"{base_url}?room_id={room_id}"
-        if self._recall_bot_id:
-            relay_url += f"&bot_id={self._recall_bot_id}"
- 
-        logger.info(f"[RECALL] Relay URL: {relay_url}")
+        logger.info(f"[RECALL] Base URL: {base_url}")
  
         while True:
             try:
-                logger.info(f"[RECALL] Initializing WebSocket connection to {relay_url}...")
+                logger.info(f"[RECALL] Initializing WebSocket connection to {base_url}...")
                 async with websockets.connect(
-                    relay_url,
+                    base_url,
                     ping_interval=20,
                     ping_timeout=20,
                     open_timeout=15,
