@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     const roomService    = new RoomServiceClient(LIVEKIT_URL, API_KEY, API_SECRET);
     const dispatchClient = new AgentDispatchClient(LIVEKIT_URL, API_KEY, API_SECRET);
  
-    await roomService.createRoom({
+    const livekitRoom = await roomService.createRoom({
       name: roomId,
       emptyTimeout: 10 * 60,
       maxParticipants: 10,
@@ -158,7 +158,7 @@ export async function POST(request: Request) {
       userEmail:   userEmail  || null,
       agentName:   agent.name,
       avatarId:    agent.avatar_id,
-      roomId,
+      roomId:      livekitRoom.sid,
       sessionKey,
       recallBotId,
     });
