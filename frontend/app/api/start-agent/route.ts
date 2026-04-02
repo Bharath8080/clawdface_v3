@@ -54,8 +54,8 @@ export async function POST(request: Request) {
       maxParticipants: 10,
     });
     
-    // Fall back to roomId just in case sid is unavailable for any reason
-    const lkRoomSid = createdRoom.sid || roomId;
+    // Strictly rely on the LiveKit internal SID (RM_...) without fallback
+    const lkRoomSid = createdRoom.sid;
  
     let recallBotId: string | null = null;
  
