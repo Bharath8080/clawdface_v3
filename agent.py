@@ -351,10 +351,10 @@ async def my_agent(ctx: agents.JobContext):
     vad_provider = silero.VAD.load()
     if connection_type in ("email_dispatch", "recall") or config.get("recallBotId"):
         recall_bot_id = config.get("recallBotId", "") or ""
-        livekit_room_name = ctx.room.name
+        livekit_room_id = config.get("roomId") or ctx.room.name
         logger.info(f"[SESSION] Start: {connection_type} | Mode: RECALL | Bot: {recall_bot_id or 'none'}")
-        logger.info(f"[STT] Meeting mode \u2192 RecallAIDirectSTT | room={livekit_room_name}")
-        stt_provider = RecallAIDirectSTT(ctx=ctx, recall_bot_id=recall_bot_id, room_id=livekit_room_name)
+        logger.info(f"[STT] Meeting mode \u2192 RecallAIDirectSTT | room_sid={livekit_room_id}")
+        stt_provider = RecallAIDirectSTT(ctx=ctx, recall_bot_id=recall_bot_id, room_id=livekit_room_id)
     else:
         logger.info(f"[SESSION] Start: {connection_type} | Mode: STANDARD")
         logger.info(f"[STT] Standard mode \u2192 Deepgram STTv2 (Flux)")

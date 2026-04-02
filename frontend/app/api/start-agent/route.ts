@@ -48,11 +48,14 @@ export async function POST(request: Request) {
     const roomService    = new RoomServiceClient(LIVEKIT_URL, API_KEY, API_SECRET);
     const dispatchClient = new AgentDispatchClient(LIVEKIT_URL, API_KEY, API_SECRET);
  
-    await roomService.createRoom({
+    const createdRoom = await roomService.createRoom({
       name: roomId,
       emptyTimeout: 10 * 60,
       maxParticipants: 10,
     });
+    
+    // Fall back to roomId just in case sid is unavailable for any reason
+    const lkRoomSid = createdRoom.sid || roomId;
  
     let recallBotId: string | null = null;
  
@@ -135,6 +138,7 @@ export async function POST(request: Request) {
       meetingUrl:   meetingUrl          || '',
       agentName:    agent.name          || 'AI Assistant',
       recallBotId:  recallBotId         || '',
+      roomId:       lkRoomSid, // Consistent SID inclusion
     });
  
     await dispatchClient.createDispatch(roomId, 'clawdface', { metadata });
@@ -147,7 +151,7 @@ export async function POST(request: Request) {
  
     const videoUrl =
       `${baseAppUrl}/avatar` +
-      `?room=${roomId}` +
+      `?room=${lkRoomSid}` +
       `&avatarId=${agent.avatar_id}` +
       `&openclawUrl=${encodeURIComponent(agent.openclaw_url)}` +
       `&gatewayToken=${agent.gateway_token}` +
@@ -158,7 +162,8 @@ export async function POST(request: Request) {
       userEmail:   userEmail  || null,
       agentName:   agent.name,
       avatarId:    agent.avatar_id,
-      roomId,
+      roomId:      lkRoomSid,
+      roomName:    roomId,
       sessionKey,
       recallBotId,
     });
