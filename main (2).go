@@ -1762,8 +1762,11 @@ func RemoveScheduleJob(scheduledJobs []ScheduledJob, jobID string) []ScheduledJo
 
 func joinMeeting(nj ScheduledJob, label string , failed *bool) {
 	log.Printf("[ScheduleJob:%s] Job fired — Name=%q MeetingURL=%q AgentEmailID=%q", label, nj.Name, nj.MeetingURL, nj.AgentEmailID)
-	lkRoomID := uuid.New().String() //Rounak's Req
-	log.Printf("[ScheduleJob:%s] Generated lkRoomID=%s", label, lkRoomID)
+	lkRoomID := nj.ID
+	if lkRoomID == "" {
+		lkRoomID = uuid.New().String()
+	}
+	log.Printf("[ScheduleJob:%s] Using lkRoomID=%s", label, lkRoomID)
 	dn := "Lisa"
 	// Temporary state Processing
 	UpdateJobStatusInDB(nj.ID, "processing")
@@ -1775,7 +1778,7 @@ func joinMeeting(nj ScheduledJob, label string , failed *bool) {
 		log.Printf("[%s] External agent detected — calling external agent API", label)
 		var agentName string
 		var extRoomID string
-		cameraURL, agentName , extRoomID, err = callExternalAgentAPI(nj.AgentEmailID, nj.MeetingURL, nj.StartTime)
+		cameraURL, agentName , extRoomID, err = callExternalAgentAPI(nj.AgentEmailID, nj.MeetingURL, nj.StartTime, lkRoomID)
 
 		if err != nil {
 			log.Printf("[%s] External agent API failed — %v", label, err)
@@ -2006,7 +2009,7 @@ func isExternalAgent(email string) bool {
 }
 
 // External Func. to  send meeting details to the external agent system and receives a video stream URL to pass to Recall as the camera feed.
-func callExternalAgentAPI(agentEmail string, meetingUrl string, startTime string ) (string,string, string, error) {
+func callExternalAgentAPI(agentEmail string, meetingUrl string, startTime string, roomId string) (string,string, string, error) {
 	apiURL := os.Getenv("EXTERNAL_AGENT_API_URL")
 	if apiURL == "" {
 		return "" ,"", "", fmt.Errorf("EXTERNAL_AGENT_API_URL is not set") 
@@ -2016,6 +2019,7 @@ func callExternalAgentAPI(agentEmail string, meetingUrl string, startTime string
 		"email":      agentEmail,
 		"meetingUrl": meetingUrl,
 		"startTime":  startTime,
+		"roomId":     roomId,
 	}
 
 	body, err := json.Marshal(payload)

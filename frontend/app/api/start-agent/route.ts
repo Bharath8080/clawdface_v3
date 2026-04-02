@@ -14,7 +14,7 @@ function generateTimestampId(prefix: string): string {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { email, meetingUrl, startTime } = body;
+    const { email, meetingUrl, startTime, roomId: requestedRoomId } = body;
  
     if (!email) {
       return NextResponse.json({ error: 'Missing email' }, { status: 400 });
@@ -34,7 +34,7 @@ export async function POST(request: Request) {
  
     const { agent, userEmail } = result;
  
-    const roomId     = generateTimestampId('room');
+    const roomId     = requestedRoomId || generateTimestampId('room');
     const sessionKey = generateTimestampId('session');
  
     const API_KEY     = process.env.LIVEKIT_API_KEY;
