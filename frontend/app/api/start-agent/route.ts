@@ -57,79 +57,6 @@ export async function POST(request: Request) {
     // Strictly rely on the LiveKit internal SID (RM_...) without fallback
     const lkRoomSid = createdRoom.sid;
  
-    let recallBotId: string | null = null;
- 
-    if (meetingUrl) {
-      const recallApiUrl = (process.env.EXTERNAL_MEETINGS_API_URL || 'https://us-west-2.recall.ai/api/v1/bot').replace(/\/$/, '');
-      const recallToken  = process.env.EXTERNAL_MEETINGS_API_TOKEN;
- 
-      const relayBase = process.env.EXTERNAL_MEETINGS_WEBHOOK_URL || '';
- 
-      const webhookUrl = relayBase;
-      console.log(`[start-agent] Recall webhook: ${webhookUrl}`);
- 
-      if (!recallToken) {
-        console.warn('[start-agent] EXTERNAL_MEETINGS_API_TOKEN not set');
-      } else {
-        try {
-          const recallBody = {
-            meeting_url: meetingUrl,
-            bot_name: agent.name || 'AI Assistant',
-            recording_config: {
-              transcript: {
-                provider: {
-                  recallai_streaming: {
-                    mode: 'prioritize_low_latency',
-                    language_code: 'en',
-                  },
-                },
-              },
-              realtime_endpoints: [
-                {
-                  type: 'webhook',
-                  url: webhookUrl,
-                  events: [
-                    'transcript.data',
-                    'transcript.partial_data',
-                    'participant_events.join',
-                    'participant_events.leave',
-                  ],
-                },
-              ],
-            },
-          };
- 
-          console.log('[start-agent] Bot payload:', JSON.stringify(recallBody, null, 2));
- 
-          const recallResp = await fetch(recallApiUrl, {
-            method: 'POST',
-            headers: {
-              Authorization:  `Token ${recallToken}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(recallBody),
-          });
- 
-          if (recallResp.ok) {
-            const recallBot = await recallResp.json() as { id: string };
-            recallBotId = recallBot.id;
-            console.log(`[start-agent] \u2713 Recall.ai bot created successfully: ${recallBotId}`);
-          } else {
-            let errDetail = '';
-            try {
-              errDetail = await recallResp.text();
-            } catch {
-              errDetail = 'Could not read error response body';
-            }
-            console.error(`[start-agent] \u2717 Recall.ai API Failure | Status: ${recallResp.status} ${recallResp.statusText} | Detail: ${errDetail}`);
-          }
-        } catch (err: unknown) {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          console.error(`[start-agent] \u2717 Network error contacting Recall.ai: ${errMsg}`);
-        }
-      }
-    }
- 
     const metadata = JSON.stringify({
       openclawUrl:  agent.openclaw_url  || '',
       gatewayToken: agent.gateway_token || '',
@@ -137,12 +64,12 @@ export async function POST(request: Request) {
       avatarId:     agent.avatar_id     || '',
       meetingUrl:   meetingUrl          || '',
       agentName:    agent.name          || 'AI Assistant',
-      recallBotId:  recallBotId         || '',
+      recallBotId:  '',
       roomId:       lkRoomSid, // Consistent SID inclusion
     });
  
     await dispatchClient.createDispatch(roomId, 'clawdface', { metadata });
-    console.log(`[start-agent] ✓ Dispatched → room=${roomId} bot=${recallBotId ?? 'none'}`);
+    console.log(`[start-agent] ✓ Dispatched → room=${roomId} bot=none`);
  
     const baseAppUrl = process.env.NEXT_PUBLIC_APP_URL;
     if (!baseAppUrl) {
@@ -165,7 +92,6 @@ export async function POST(request: Request) {
       roomId:      lkRoomSid,
       roomName:    roomId,
       sessionKey,
-      recallBotId,
     });
  
   } catch (error: unknown) {

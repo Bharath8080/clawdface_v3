@@ -28,15 +28,21 @@ from livekit.agents.voice.room_io import RoomOptions
 load_dotenv()
 logger = logging.getLogger("trugen-agent")
 
+# ---------------------------------------------------------------------------
+# LOG FILTERING
+# ---------------------------------------------------------------------------
 class SilencePaddingFilter(logging.Filter):
+    """
+    Suppresses noisy LiveKit warnings (silence padding, input samples) for all sessions.
+    """
     def filter(self, record):
         msg = record.getMessage()
         if "skipping silence padding" in msg or "Input is shorter by" in msg:
             return False
         return True
 
+# Apply filter to the noisy LiveKit logger
 logging.getLogger("livekit.agents").addFilter(SilencePaddingFilter())
- 
 
  
 # ---------------------------------------------------------------------------
@@ -165,7 +171,7 @@ class RecallSpeechStream(stt.SpeechStream):
  
                         msg = json.loads(raw)
                         event = msg.get("event")
-                        logger.info(f"[RECALL] Incoming event: {event} | Payload: {raw}")
+                        logger.debug(f"[RECALL] Incoming event: {event} | Payload: {raw}")
 
                         if event in ("transcript.data", "transcript.partial_data"):
                             # Robust parsing: try nested 'data.data' then fall back to 'data'
@@ -183,7 +189,7 @@ class RecallSpeechStream(stt.SpeechStream):
                                 if event == "transcript.data":
                                     participant = inner_data.get("participant", {})
                                     speaker = participant.get("name", "Unknown") if isinstance(participant, dict) else "Unknown"
-                                    logger.info(f"[RECALL] FINAL | {speaker}: {text}")
+                                    logger.debug(f"[RECALL] FINAL | {speaker}: {text}")
                                     self._emit_final(f"{speaker}: {text}")
                                 else:
                                     logger.debug(f"[RECALL] PARTIAL: {text}")
@@ -384,8 +390,8 @@ async def my_agent(ctx: agents.JobContext):
 
     @session.on("user_input_transcribed")
     def on_user_speech(ev: agents.UserInputTranscribedEvent):
-        if ev.transcript:
-            logger.info(f"[STT] \u2713 Transcribed: {ev.transcript}")
+        if ev.transcript and ev.is_final:
+            logger.info(f"[STT] \u2713 {ev.transcript}")
 
     @session.on("conversation_item_added")
     def on_item_added(ev: agents.ConversationItemAddedEvent):
