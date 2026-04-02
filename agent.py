@@ -27,6 +27,15 @@ from livekit.agents.voice.room_io import RoomOptions
  
 load_dotenv()
 logger = logging.getLogger("trugen-agent")
+
+class SilencePaddingFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        if "skipping silence padding" in msg or "Input is shorter by" in msg:
+            return False
+        return True
+
+logging.getLogger("livekit.agents").addFilter(SilencePaddingFilter())
  
 
  
