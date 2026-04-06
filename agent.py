@@ -259,7 +259,7 @@ def resolve_config(ctx: agents.JobContext) -> tuple[dict, str]:
 
     # 4. Backend Dynamic Lookup (by Room Name/Email)
     room_id = ctx.room.name
-    if room_id and not room_id.startswith("room-") and not room_id.startswith("RM_"):
+    if room_id and not room_id.startswith("room-"):
         email = room_id if "@" in room_id else f"{room_id}@agent.truhire.ai"
         try:
             base_url = os.getenv("FRONTEND_URL", "").rstrip("/")

@@ -1788,15 +1788,15 @@ func joinMeeting(nj ScheduledJob, label string , failed *bool) {
 			*failed = true
 			return
 		}
-		if extRoomID != "" {
-			log.Printf("[%s] Using external roomID=%s (replacing lkRoomID=%s)", label, extRoomID, lkRoomID)
-			lkRoomID = extRoomID  // ← now = "room-2026-04-06T10-30-55" (room NAME)
-		} else {
-			log.Printf("[%s] WARNING: external API returned no roomId — using generated lkRoomID=%s", label, lkRoomID)
-		}  
+		if extRoomID != "" {                                                          
+            log.Printf("[%s] Using external roomID=%s (replacing lkRoomID=%s)", label, extRoomID, lkRoomID)
+            lkRoomID = extRoomID                                                      
+        } else {                                                                        
+            log.Printf("[%s] WARNING: external API returned no roomId — using generated lkRoomID=%s", label, lkRoomID)
+        }  
 
 		dn = agentName
-		log.Printf("[%s] Got videoUrl — %s lkRoomID=%s", label, cameraURL, lkRoomID)
+		log.Printf("[%s] Got videoUrl — %s", label, cameraURL , lkRoomID)
 	} else {
 		// Existing flow 
 		log.Printf("[%s] Default agent — using AVATAR_VIDEO_STREAM", label)
