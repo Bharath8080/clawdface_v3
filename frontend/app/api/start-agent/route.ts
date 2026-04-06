@@ -65,7 +65,7 @@ export async function POST(request: Request) {
       meetingUrl:   meetingUrl          || '',
       agentName:    agent.name          || 'AI Assistant',
       recallBotId:  '',
-      roomId:       lkRoomSid, // Consistent SID inclusion
+      roomId:       roomId, // Use room name for metadata alignment
     });
  
     await dispatchClient.createDispatch(roomId, 'clawdface', { metadata });
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
  
     const videoUrl =
       `${baseAppUrl}/avatar` +
-      `?room=${lkRoomSid}` +
+      `?room=${roomId}` + // Use room name for avatar join
       `&avatarId=${agent.avatar_id}` +
       `&openclawUrl=${encodeURIComponent(agent.openclaw_url)}` +
       `&gatewayToken=${agent.gateway_token}` +
@@ -89,7 +89,8 @@ export async function POST(request: Request) {
       userEmail:   userEmail  || null,
       agentName:   agent.name,
       avatarId:    agent.avatar_id,
-      roomId:      lkRoomSid,
+      roomId:      roomId, // Return room name for Go relay key
+      roomSid:     lkRoomSid, // Maintain SID for reference if needed
       roomName:    roomId,
       sessionKey,
     });
