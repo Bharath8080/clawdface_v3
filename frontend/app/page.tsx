@@ -72,7 +72,7 @@ const AVATARS = [
   { id: "05b401f3", name: "Misha",    image: "/avatars/misha.jpg" },
   { id: "13550375", name: "Alex",     image: "/avatars/alex.png" },
   { id: "48d778c9", name: "Amir",     image: "/avatars/amir.jpg" },
-  { id: "48d778c9", name: "Akbar",    image: "/avatars/akbar.jpg" },
+  { id: "55d889d0", name: "Akbar",    image: "/avatars/akbar.jpg" },
 ];
 
 // ─── Icons ──────────────────────────────────────────────────────────────────
@@ -608,6 +608,16 @@ export default function Page() {
       room.off(RoomEvent.Disconnected, handleDisconnected);
     };
   }, [room]);
+
+  // ─── Auto-disconnect call on navigation ────────────────────────────────────
+  useEffect(() => {
+    // If the room is connected (or connecting) and the user navigates to a new section,
+    // explicitly disconnect it to ensure a clean state for the new view.
+    if (room && (room.state === "connected" || room.state === "connecting" || room.state === "reconnecting")) {
+      console.log("🚶 Navigation event: User moved to section:", activeSession, "- auto-disconnecting call");
+      room.disconnect();
+    }
+  }, [activeSession, room]);
 
   if (!authChecked) {
     return (
@@ -1225,12 +1235,12 @@ function AvatarPickerModal({
               <button
                 key={avatar.id}
                 onClick={() => setTempId(avatar.id)}
-                className={`group relative rounded-2xl transition-all duration-300 overflow-hidden ${
+                className={`group relative rounded-2xl transition-all duration-200 overflow-hidden ${
                   tempId === avatar.id ? "ring-2 ring-[#00E3AA] shadow-[0_0_30px_rgba(0,227,170,0.2)]" : "border border-white/5 hover:border-white/10"
                 }`}
               >
                 <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-white/5 shadow-inner">
-                  <img src={avatar.image} alt={avatar.name} className={`w-full h-full object-cover transition-transform duration-500 ${tempId === avatar.id ? "scale-105" : "group-hover:scale-105"}`} loading="lazy" />
+                  <img src={avatar.image} alt={avatar.name} className={`w-full h-full object-cover transition-transform duration-300 ${tempId === avatar.id ? "scale-105" : "group-hover:scale-105"}`} loading="lazy" />
                   <div className="absolute top-2 left-2"><span className="px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11px] text-white font-semibold border border-white/10 shadow-lg">{avatar.name}</span></div>
                   <div className="absolute top-2 right-2"><span className="px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11px] text-white/80 font-medium border border-white/10 shadow-lg">Huma-2</span></div>
                   <div className="absolute bottom-3 left-3"><span className="text-[10px] text-white font-bold uppercase tracking-wider">PRO</span></div>
@@ -1270,9 +1280,9 @@ function AvatarGallery() {
         </header>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 md:gap-8">
           {AVATARS.map((avatar) => (
-            <div key={avatar.id} className="group relative rounded-2xl transition-all duration-300 overflow-hidden border border-white/5 hover:border-white/10">
+            <div key={avatar.id} className="group relative rounded-2xl transition-all duration-200 overflow-hidden border border-white/5 hover:border-white/10">
               <div className="relative w-full aspect-video">
-                <img src={avatar.image} alt={avatar.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" loading="lazy" />
+                <img src={avatar.image} alt={avatar.name} className="w-full h-full object-cover transition-transform duration-400 group-hover:scale-105" loading="lazy" />
                 <div className="absolute top-2 left-2"><span className="px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11px] text-white font-semibold border border-white/10 shadow-lg">{avatar.name}</span></div>
                 <div className="absolute top-2 right-2"><span className="px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md text-[11px] text-white/80 font-medium border border-white/10 shadow-lg">Huma-2</span></div>
                 <div className="absolute bottom-3 left-3"><span className="text-[10px] text-white font-bold uppercase tracking-wider">PRO</span></div>
@@ -1605,7 +1615,7 @@ function BotLibraryView({
             variants={containerVariants}
             initial="hidden"
             animate="visible"
-            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-8"
+            className="grid grid-cols-1 min-[500px]:grid-cols-2 min-[1100px]:grid-cols-3 xl:grid-cols-3 gap-6 md:gap-8"
           >
             {bots.map((bot) => {
               const avatar = AVATARS.find(a => a.id === bot.avatar_id);
@@ -1613,19 +1623,19 @@ function BotLibraryView({
                 <motion.div 
                   key={bot.id} 
                   variants={cardVariants}
-                  whileHover={{ y: -10 }}
+                  whileHover={{ y: -12, scale: 1.02, transition: { type: "spring", stiffness: 260, damping: 25 } }}
                   onClick={() => onSelectBot(bot)} 
-                  className="group relative rounded-[2rem] bg-[#0a0a0a]/80 backdrop-blur-xl border border-white/5 hover:border-[#00E3AA]/40 transition-all duration-500 overflow-hidden cursor-pointer flex flex-col shadow-2xl hover:shadow-[#00E3AA]/10"
+                  className="group relative rounded-[2rem] bg-[#0a0a0a]/80 backdrop-blur-xl border border-white/5 hover:border-[#00E3AA]/40 transition-[border-color,box-shadow,background-color] duration-300 overflow-hidden cursor-pointer flex flex-col shadow-2xl hover:shadow-[#00E3AA]/20"
                 >
                   {/* Decorative background glow */}
-                  <div className="absolute top-0 right-0 w-24 h-24 bg-[#00E3AA]/5 rounded-full blur-[60px] pointer-events-none group-hover:bg-[#00E3AA]/10 transition-colors" />
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-[#00E3AA]/5 rounded-full blur-[60px] pointer-events-none group-hover:bg-[#00E3AA]/20 transition-all duration-300" />
                   
                   <div className="relative aspect-[16/10] w-full overflow-hidden bg-black/40">
                     {avatar ? (
                       <img 
                         src={avatar.image} 
                         alt={bot.name} 
-                        className="w-full h-full object-cover transition-all duration-1000 scale-105 group-hover:scale-110 opacity-100 grayscale-0" 
+                        className="w-full h-full object-cover transition-transform duration-500 scale-105 group-hover:scale-110 opacity-100 grayscale-0" 
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-neutral-800"><UserIcon size={56} /></div>
@@ -1634,7 +1644,7 @@ function BotLibraryView({
                     <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/20 to-transparent opacity-90" />
                     
                     {/* Floating Controls */}
-                    <div className="absolute top-4 right-4 flex gap-2 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
+                    <div className="absolute top-4 right-4 flex gap-2 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-200">
                       <button 
                         onClick={(e) => { e.stopPropagation(); onEditBot(bot); }} 
                         className="p-2.5 rounded-xl bg-black/40 backdrop-blur-xl border border-white/10 text-white/50 hover:text-white hover:bg-[#00E3AA]/20 hover:border-[#00E3AA]/40 transition-all"
@@ -1653,7 +1663,7 @@ function BotLibraryView({
 
                     {/* Bot Name Badge (Bottom Left) */}
                     <div className="absolute bottom-4 left-6">
-                      <h3 className="text-xl font-bold text-white tracking-tight group-hover:text-[#00E3AA] transition-colors font-outfit">
+                      <h3 className="text-xl font-bold text-white tracking-tight group-hover:text-[#00E3AA] transition-colors duration-200 font-outfit">
                         {bot.name || "Unnamed Bot"}
                       </h3>
                       <div className="flex items-center gap-1.5 mt-1">
@@ -1715,10 +1725,10 @@ function BotLibraryView({
                       </div>
                     </div>
 
-                    <div className="mt-8 flex items-center justify-between px-1">
+                    <div className="mt-8 flex flex-wrap items-end justify-between gap-y-4 gap-x-2 px-1">
                       <div className="flex flex-col">
                         <span className="text-[9px] text-neutral-600 font-bold uppercase tracking-tighter font-outfit">Creation Date</span>
-                        <div className="flex items-center gap-1.5 text-[11px] text-neutral-400 font-bold font-jetbrains-mono">
+                        <div className="flex items-center gap-1.5 text-[11px] text-neutral-400 font-bold font-jetbrains-mono whitespace-nowrap">
                           <span className="text-neutral-700"><ClockIcon size={12} /></span>
                           <span>{new Date(bot.created_at).toLocaleDateString()}</span>
                         </div>
@@ -1743,7 +1753,7 @@ function BotLibraryView({
                           <span className="group-hover/recall:scale-110 transition-transform block"><LinkIcon size={16} /></span>
                         </button>
                         
-                        <button className="h-10 px-5 rounded-xl bg-[#00E3AA] hover:bg-[#00ffd0] text-black text-[12px] font-bold uppercase tracking-widest transition-all transform hover:scale-[1.02] active:scale-95 shadow-[0_4px_12px_rgba(0,227,170,0.2)] flex items-center gap-2">
+                        <button className="h-10 px-5 rounded-xl bg-[#00E3AA] hover:bg-[#00ffd0] text-black text-[12px] font-bold uppercase tracking-widest transition-all transform hover:scale-[1.02] active:scale-95 shadow-[0_4px_12px_rgba(0,227,170,0.2)] flex items-center gap-2 shrink-0 whitespace-nowrap">
                           Connect
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
                             <polygon points="5 3 19 12 5 21 5 3"/>

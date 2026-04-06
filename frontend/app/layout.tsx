@@ -22,6 +22,11 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "ClawdFace",
+  icons: {
+    icon: "/openclaw.png",
+    shortcut: "/openclaw.png",
+    apple: "/openclaw.png",
+  }
 };
 
 export default function RootLayout({
