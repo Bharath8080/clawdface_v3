@@ -65,7 +65,7 @@ export async function POST(request: Request) {
       meetingUrl:   meetingUrl          || '',
       agentName:    agent.name          || 'AI Assistant',
       recallBotId:  '',
-      roomId:       lkRoomSid, // Consistent SID inclusion
+      roomId:       roomId,             // ← room NAME not lkRoomSid
     });
  
     await dispatchClient.createDispatch(roomId, 'clawdface', { metadata });
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
  
     const videoUrl =
       `${baseAppUrl}/avatar` +
-      `?room=${lkRoomSid}` +
+      `?room=${roomId}` +               // ← room NAME not lkRoomSid
       `&avatarId=${agent.avatar_id}` +
       `&openclawUrl=${encodeURIComponent(agent.openclaw_url)}` +
       `&gatewayToken=${agent.gateway_token}` +
@@ -89,7 +89,8 @@ export async function POST(request: Request) {
       userEmail:   userEmail  || null,
       agentName:   agent.name,
       avatarId:    agent.avatar_id,
-      roomId:      lkRoomSid,
+      roomId:      roomId,              // ← room NAME
+      roomSid:     lkRoomSid,          // ← keep SID separately if needed
       roomName:    roomId,
       sessionKey,
     });

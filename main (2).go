@@ -1796,7 +1796,7 @@ func joinMeeting(nj ScheduledJob, label string , failed *bool) {
         }  
 
 		dn = agentName
-		log.Printf("[%s] Got videoUrl — %s", label, cameraURL , lkRoomID)
+		log.Printf("[%s] Got videoUrl — %s lkRoomID=%s", label, cameraURL, lkRoomID)
 	} else {
 		// Existing flow 
 		log.Printf("[%s] Default agent — using AVATAR_VIDEO_STREAM", label)
