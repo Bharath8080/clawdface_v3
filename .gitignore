@@ -22,10 +22,15 @@ data/room-configs/
 # Dev/debug/scratch scripts (not part of the public project)
 debug_env.py
 test.py
+test01.py
+test_toolcall.py
+"main (2).go"
+bp.py
 app.py
 main.py
 tavus.py
 trugen.py
+avatars/
 
 # Python version pin (local dev only)
 .python-version
